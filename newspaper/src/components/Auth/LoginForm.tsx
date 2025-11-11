@@ -26,8 +26,26 @@ const LoginForm: React.FC = () => {
     // Если поля пусты, можно подставить из моков для удобства.
     let selectedRole = role || mockUsers[0].role;
     let finalUsername = username.trim() || `user_${selectedRole}`;
+    
+    // Ищем пользователя в моках по роли, или создаем стабильный ID на основе username + role
+    const mockUser = mockUsers.find(u => u.role === selectedRole);
+    let userId: string;
+    
+    if (mockUser) {
+      // Используем ID из моков для стабильности
+      userId = mockUser.id;
+      finalUsername = mockUser.username;
+    } else {
+      // Создаем стабильный ID на основе username + role (hash)
+      const hash = `${finalUsername}_${selectedRole}`.split('').reduce((acc, char) => {
+        acc = ((acc << 5) - acc) + char.charCodeAt(0);
+        return acc & acc;
+      }, 0);
+      userId = `user_${Math.abs(hash)}`;
+    }
+    
     const user: User = {
-      id: String(Date.now()),
+      id: userId,
       username: finalUsername,
       email: `${finalUsername}@local`,
       role: selectedRole

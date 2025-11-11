@@ -1,0 +1,967 @@
+Use Case №1.1: Creating an Article
+Actor: Author
+Goal: Start a new article and link it to an issue.
+Prerequisites:
+Author is logged into the system.
+
+
+At least one issue is open for submissions.
+
+
+Main Scenario:
+Author selects "Create new article".
+
+
+Selects an issue from the available list.
+
+
+Enters the article title.
+
+
+(Optional) Adds a short description/annotation.
+
+
+System creates a new draft and links it to the selected issue.
+
+
+Alternative Scenarios:
+A1. No issues available for submission:
+
+
+System displays a message: "No active issues are open for submissions".
+
+
+
+
+
+
+
+Use Case №1.2: Editing a Draft Article
+Actor: Author
+Goal: Edit the content of a draft article.
+Prerequisites:
+Author is logged in.
+
+
+At least one draft article exists.
+
+
+Main Scenario:
+Author opens the list of drafts.
+
+
+Selects an article.
+
+
+Updates the content: edits text (headings, lists, links).
+
+
+(Optional) Uploads or updates images in the text.
+
+
+Saves the changes.
+
+
+System updates the draft with the new content.
+
+
+Alternative Scenarios:
+A1. Draft not found:
+
+
+The selected draft was deleted or unavailable → system shows error message.
+
+
+A2. Save fails (e.g., connection lost):
+
+
+System displays error, draft changes may be kept in local cache until retry.
+
+
+             
+
+Use Case №1.3: Saving a Draft
+Actor: Author
+Goal: Save intermediate progress of an article.
+Prerequisites:
+Author is logged in.
+
+
+A draft article exists and is open for editing.
+
+
+Main Scenario:
+Author selects "Save draft".
+
+
+System stores the current state of the article in the database.
+
+
+System confirms successful save.
+
+
+Alternative Scenarios:
+A1. Connection lost / system error:
+
+
+System shows error message, unsaved changes may remain in local cache until retry.
+
+
+A2. No changes detected:
+
+
+System ignores the save request and confirms "No changes to save".
+
+
+             
+
+Use Case №1.4: Submitting an Article for Review
+Actor: Author
+Goal: Send a completed article to the proofreader for review.
+Prerequisites: 
+Author is logged in.
+Draft article exists.
+Draft is linked to an issue.
+Draft status is "Completed" (ready for submission).
+Main Scenario: 
+Author opens the draft.
+Author selects "Submit for review".
+System validates that the draft is complete and linked to an issue.
+System changes the article status to "Under review".
+Proofreader receives a notification.
+Alternative Scenarios: 
+A1. Draft is not linked to any issue: 
+System blocks submission and prompts author to select an issue.
+A2. Article already submitted: 
+System prevents re-submission and shows current status.
+ 
+  
+
+Use Case №2.1: Proofreading an Article
+Actor: Proofreader
+Goal: Check the article for spelling, punctuation, and style.
+Prerequisites:
+Proofreader is logged in.
+
+
+Articles with status "Under review" exist.
+
+
+Proofreader has editing rights.
+
+
+Main Scenario:
+Proofreader opens the review queue.
+
+
+Selects an article.
+
+
+Reads the text and checks for spelling, punctuation, and style issues.
+
+
+Makes corrections directly in the system.
+
+
+Saves the updated version.
+
+
+(Optional) Adds comments or suggestions for the author.
+
+
+Marks the article as "Reviewed" and sends it to the Chief Editor.
+
+
+Alternative Scenarios:
+A1. Article requires major revision:
+
+
+Proofreader returns it to the author with comments. Status → "Needs revision".
+
+
+A2. Proofreader cannot finish in one session:
+
+
+Saves progress, but status remains "Under review".
+
+
+             
+
+Use Case №2.2: Approving an Article
+Actor: Proofreader
+Goal: Approve the corrected article for layout.
+Prerequisites:
+Proofreader is logged in.
+
+
+Article status is "Under review".
+
+
+All necessary corrections have been made.
+
+
+Main Scenario:
+Proofreader opens the article.
+
+
+Reviews corrections one final time.
+
+
+Selects "Approve".
+
+
+(Optional) Adds a short note or comment for the layout designer.
+
+
+System changes article status to "Approved".
+
+
+Layout designer receives a notification and can include the article in the issue layout.
+
+
+Alternative Scenarios:
+A1. Additional issues found:
+
+
+Proofreader returns the article to the author. Status → "Needs revision".
+
+
+A2. Insufficient permissions:
+
+
+System notifies Proofreader that only the Chief Editor can approve.
+
+
+
+             
+
+
+Use Case №3.1: Add Illustration
+Actor: Illustrator (or Author if permitted)
+Goal: Add an illustration to an article, following page template rules.
+Prerequisites:
+User is logged in.
+
+
+User has rights to work with images.
+
+
+Page template defines rules for image placement and text wrapping.
+
+
+Main Scenario:
+User opens an article (status: Draft, Under review, or Approved).
+
+
+User selects Add illustration.
+
+
+User uploads an image file (supported format).
+
+
+User links the image to text position or the article overall.
+
+
+System applies template rules (placement, text wrapping).
+
+
+(Optional) User adds caption/comment.
+
+
+User saves changes.
+
+
+System updates article status.
+
+
+Alternative Scenarios:
+Unsupported format → error message.
+
+
+Placeholder image added → can be replaced later.
+
+
+Attempt to modify after page is fixed → system blocks action and suggests requesting layout designer intervention.
+
+
+             
+
+Use Case №3.2: Replace Illustration
+
+Actor: Illustrator (or Author if permitted)
+Goal: Replace an existing illustration in an article.
+Prerequisites:
+User is logged in.
+
+
+User has rights to work with images.
+
+
+Page template defines rules for image placement and text wrapping.
+
+
+Main Scenario:
+User opens an article (status: Draft, Under review, or Approved).
+
+
+User selects Replace illustration.
+
+
+User chooses an existing image.
+
+
+User uploads a new file or edits the caption.
+
+
+System updates the illustration in the same position.
+
+
+User saves changes.
+
+
+System updates article status.
+
+
+Alternative Scenarios:
+Unsupported format → error message.
+
+
+Attempt to modify after page is fixed → system blocks action and suggests requesting layout designer intervention.
+
+
+ 
+ Use Case №3.3: Delete Illustration
+ Actor: Illustrator (or Author if permitted)
+Goal: Delete an illustration from an article.
+Prerequisites:
+User is logged in.
+
+
+User has rights to work with images.
+
+
+Page template defines rules for image placement and text wrapping.
+
+
+Main Scenario:
+User opens an article (status: Draft, Under review, or Approved).
+
+
+User selects Delete illustration.
+
+
+User chooses the image to remove.
+
+
+User confirms deletion.
+
+
+System removes the image and adjusts text flow.
+
+
+User saves changes.
+
+
+System updates article status.
+
+
+Alternative Scenarios:
+Attempt to modify after page is fixed → system blocks action and suggests requesting layout designer intervention.
+
+
+  
+
+
+Use Case №4.1.1: Place Article into Columns
+Actor:
+Layout Designer
+Goal:
+Place an article into page columns according to the layout template, ensuring correct text flow and continuation across columns and pages.
+Preconditions:
+The article has status “Approved.”
+
+
+A page template (JSON) with defined columns and flow rules exists.
+
+
+The page may already contain articles, illustrations, or advertisement blocks.
+
+
+Main Scenario:
+Layout Designer opens the “Layout” module.
+
+
+Selects a page template.
+
+
+Selects an article to place.
+
+
+Chooses the placement position:
+
+
+at the end of existing content, or
+
+
+between already placed articles.
+
+
+The system checks the selected area:
+
+
+if fixed illustrations or ad blocks are present,
+the system reserves their space and adjusts available column height.
+
+
+Layout Designer confirms the placement.
+
+
+The system inserts the article text and flows it through the columns according to the template rules.
+
+
+If the text reaches a fixed illustration:
+
+
+the system automatically wraps the text around it (if allowed by the template);
+
+
+otherwise, the remaining text is continued in the next column or page.
+
+
+If the text does not fit in the current column or page:
+
+
+the system automatically continues the article in the next column or page,
+following the column flow rules defined in the JSON template (column_flow_rules).
+
+
+inline illustrations move together with their related text fragments;
+fixed-position elements (ads, anchored images) remain static.
+
+
+Layout Designer reviews the page layout and column balance, adjusting manually if needed.
+
+
+Saves the updated page.
+
+
+The system confirms successful placement and updates the layout.
+
+
+Alternative Scenarios:
+A1. Article too long → the system suggests splitting it across multiple pages or issues.
+
+
+A2. Placement conflicts with the template grid → the system suggests adjusting spacing or using another template.
+
+
+A3. Inserted article displaces inline images from other articles → the system performs automatic reflow to correct layout.
+
+
+A4. Automatic continuation causes visual imbalance → manual correction by the Layout Designer.
+
+
+A5. Template restricts continuation between specific columns (e.g., across spreads) → system warns and suggests alternative placements.
+
+
+             
+
+
+             
+Use Case №4.1.3:Reflow
+Actor: Layout Designer
+Goal: Insert a new article or modify text flow between existing articles, automatically adjusting surrounding content.
+Preconditions:
+Page already contains one or more articles.
+
+
+At least one new article or updated text is available.
+
+
+Illustrations or ad blocks may be present on the page.
+
+
+Main Scenario:
+Layout Designer selects a position between two existing articles (or within one article).
+
+
+Inserts new text or a new article.
+
+
+System recalculates the layout, redistributing text across columns.
+
+
+If the text encounters inline illustrations, system moves those illustrations down with the corresponding paragraph.
+
+
+If the text encounters fixed illustrations or ad blocks, system adjusts text flow:
+
+
+wraps text around them if template allows;
+
+
+
+
+
+System ensures column balance and consistent spacing between articles.
+
+
+Layout Designer reviews visual layout and manually adjusts if needed.
+
+
+Saves the page.
+
+
+Alternative Scenarios:
+Reflow causes overlapping or misalignment → manual correction required.
+
+
+Not enough space → system suggests moving overflow to the next page or changing template.
+
+ Use Case №4.1.4:Place Illustration on Layout
+Actor: Layout Designer / Illustrator (if permitted)
+Goal: Place an illustration on a page layout, respecting template rules and column constraints.
+Preconditions:
+User is logged in.
+
+
+User has rights to add illustrations.
+
+
+Page template (JSON) defines layout rules, including column count and allowed illustration positions.
+
+
+Main Scenario:
+User opens the article or page layout.
+
+
+Selects “Add illustration.”
+
+
+Chooses illustration type:
+
+
+Inline — attached to a position in the article text;
+
+
+Fixed — placed in a specific area defined by the page template.
+
+
+If inline → user selects insertion point in text; system inserts image between paragraphs and reflows text.
+
+
+If fixed → user selects position on layout grid (e.g., “column 2, top half”).
+
+
+User specifies how many columns the illustration should span.
+
+
+System automatically scales the image so its width matches a multiple of column width.
+
+
+System applies template wrapping rules:
+
+
+text wraps around the illustration if allowed;
+
+
+
+(Optional) User adds caption or comment.
+
+
+User saves changes.
+
+
+System updates layout and recalculates text flow where necessary.
+
+
+Alternative Scenarios:
+Unsupported format → system shows error message.
+
+
+Illustration too wide → system resizes or repositions according to template.
+
+
+Attempt to modify after page is fixed → system blocks action and suggests designer intervention.
+
+
+Text wrapping causes overlap → system reflows text or flags for manual correction.
+
+
+             
+
+ Use Case №4.2:Managing Templates
+Actor: Administrator / Layout Designer
+Goal: Create and edit page templates that define the layout of articles, illustrations, and ad blocks.
+Prerequisites:
+User has rights to edit templates.
+
+
+Main Scenario:
+User opens the “Templates” module.
+
+
+Creates a new template or selects an existing template to edit.
+
+
+Defines template parameters in JSON format, including:
+
+
+Number of columns
+
+
+Positions for ad blocks
+
+
+Positions and wrapping rules for illustrations
+
+
+Other layout parameters (margins, headers, footers)
+
+
+Saves the template.
+
+
+Alternative Scenarios:
+Invalid JSON structure → system displays an error message.
+
+
+Required fields missing → system highlights missing fields.
+
+
+             
+
+
+
+
+Use Case №5: Creating a Cover Page
+Actor: Layout Designer
+Goal: Create the cover page for the current issue using a predefined template (JSON).
+Prerequisites:
+Issue exists in the system.
+
+
+Cover page template is defined in the system.
+
+
+Main Scenario:
+User opens the “Cover Page” module.
+
+
+Selects a cover page template (JSON).
+
+
+Fills in the content fields defined by the template:
+
+
+Issue number
+
+
+Issue date
+
+
+Title (publication title is fixed)
+
+
+Optional theme or slogan
+
+
+Cover image
+
+
+System automatically arranges elements according to the template.
+
+
+User previews and saves the cover page.
+
+
+Alternative Scenarios:
+Content does not fit template bounds → system resizes or suggests adjustments.
+
+
+Required content missing → system shows validation error.
+
+
+            
+
+Use Case №6.1: Adding Advertisements
+Actor: Layout Designer
+Goal: Insert an advertisement block on pages according to the template.
+Prerequisites:
+Advertisement material is uploaded.
+
+
+Pages and templates exist.
+
+
+Template defines allowed ad sizes and positions.
+
+
+Main Scenario:
+Layout Designer opens the "Ads" module.
+
+
+Creates a new ad block.
+
+
+Uploads text and/or image.
+
+
+Selects placement:
+
+
+Automatic (system chooses slot according to template)
+
+
+Manual (designer selects page and position)
+
+
+System applies template rules and checks for space/conflicts.
+
+
+Layout Designer saves changes.
+
+
+Alternative Scenarios:
+Ad does not fit → system suggests moving to next page or resizing.
+
+
+Ad format/size is unsupported → system shows error.
+
+
+Conflict with article/illustration → system warns and suggests options.
+
+
+        
+
+Use Case №6.2: Remove Advertisement Block
+Actor: Layout Designer
+Goal: Remove an advertisement block from pages.
+Prerequisites:
+Ad block exists.
+
+
+Pages and templates are available.
+
+
+Main Scenario:
+Layout Designer opens the list of ad blocks.
+
+
+Selects the block to remove.
+
+
+Confirms deletion.
+
+
+System removes the ad block.
+
+
+Alternative Scenarios:
+Ad block already deleted → system shows error.
+
+
+Deletion affects page layout → system warns designer.
+
+
+           
+
+Use Case №6.3: Auto-place Ads Across Pages
+Actor: Layout Designer
+Goal: Automatically distribute advertisement blocks across pages.
+Prerequisites:
+Ad blocks exist.
+
+
+Pages exist.
+
+
+Template defines allowed positions and sizes for ads.
+
+
+Main Scenario:
+Layout Designer selects "Auto-place Ads."
+
+
+System automatically distributes ad blocks according to available slots and template rules.
+
+
+Layout Designer reviews placement and adjusts manually if necessary.
+
+
+Alternative Scenarios:
+Not enough space for all ads → system notifies designer and suggests adjustments.
+
+
+Conflict with text or illustrations → system alerts designer.
+
+
+             
+
+Use Case №6.4: Scheduling Ads for Multiple Issues
+Actor: Layout Designer / Ad Administrator
+Goal: Place an advertisement block in multiple upcoming issues.
+Prerequisites:
+Advertisement material is uploaded.
+
+
+At least one upcoming issue exists.
+
+
+Template rules define allowed positions for ads.
+
+
+Main Scenario:
+Opens "Ads" module.
+
+
+Creates or selects an ad block.
+
+
+Specifies:
+
+
+Number of issues (n) for placement
+
+
+Specific issue numbers (if needed)
+
+
+Saves settings.
+
+
+System automatically inserts the ad into the selected issues according to the template.
+
+
+Alternative Scenarios:
+Incorrect size/format → system shows error.
+
+
+User modifies the list of issues → system updates ad placement.
+
+
+User removes ad from future issues → system adjusts placement.
+
+Use Case №7: Approving the Final Issue
+Actor: Chief Editor
+Goal: Review and approve the issue for publication.
+Prerequisites:
+All materials (articles, illustrations, ads) are placed and approved where required.
+
+
+Issue preview is available.
+
+
+Main Scenario:
+Chief Editor opens issue preview.
+
+
+Reviews all pages, checking layout, text, images, and ads.
+
+
+If corrections are needed → assigns corrections to relevant actors (layout designer, proofreader).
+
+
+If everything is correct → selects "Approve Issue".
+
+
+System changes issue status to "Ready for export".
+
+
+Alternative Scenarios:
+Corrections needed → system updates issue status to "Needs corrections" and notifies responsible actors.
+
+
+            
+
+Use Case №8: Exporting the Issue
+Actor: Chief Editor / Layout Designer
+Goal: Generate printable file or PDF for the issue.
+Prerequisites:
+Issue status is "Ready for export".
+
+
+Main Scenario:
+Selects "Export Issue".
+
+
+Chooses format (PDF, print).
+
+
+System generates the file according to template rules.
+
+
+File is saved and available for download.
+
+
+Alternative Scenarios:
+File generation fails → system shows error and suggests retry.
+
+
+Selected format not supported → system shows supported formats.
+
+
+      
+
+
+Term
+Definition
+Article
+Text material including title, main text, and images if necessary, intended for publication in a periodical.
+Draft
+Unfinished article not yet submitted for review.
+Issue
+Specific issue of a newspaper or magazine with a unique issue number and publication date, containing all articles, illustrations, and advertising materials.
+Layout
+Process of placing articles, images, and advertisements on pages according to design rules and templates.
+Page Template
+Predefined page layout defining columns, headers, areas for images and advertisements, used to maintain consistent style and speed up layout. Specifies the allowed column count, placement rules for illustrations and ads, text wrapping rules, margins, headers, footers, and any constraints for content flow. Represented in JSON format.
+JSON Template Structure
+Standardized structure for page templates. Mandatory fields include:
+
+
+columns: Number of columns per page.
+
+
+ad_slots: Array of positions available for advertisement blocks. Each slot includes coordinates, width, height, and allowed content types.
+
+
+illustration_positions: Positions for fixed or inline illustrations; includes allowed columns, maximum width/height, and text wrapping rules.
+
+
+margins: Top, bottom, left, and right page margins.
+
+
+headers: Content and layout for page headers.
+
+
+footers: Content and layout for page footers.
+
+
+text_flow_rules: Defines how text behaves when encountering illustrations, ads, or multi-column continuation.
+
+
+cover_template (optional): Defines fixed positions and fields for cover page elements such as issue number, date, title, slogan, and cover image.
+ Advertisement | Separate block of text and/or images placed on pages, usually in reserved positions, which can be positioned manually or automatically.
+ Cover | First page of an issue containing the title, issue number, date, and cover image.
+ Illustration | Images or graphics related to an article, added by an illustrator to enhance visual content.
+ Proofreading | Process of checking and correcting spelling, punctuation, and style in articles before approval.
+ Approval | Status assigned to an article or issue after passing review and being ready for layout or publication.
+ Auto-layout | Functionality where the system automatically places text, images, and advertisements according to templates.
+ Column | Vertical text block in a page layout, often part of a multi-column design.
+ Header/Footer | Text areas at the top/bottom of a page containing information such as issue number, date, and page number.
+ Slot | Reserved place in a page template for placing advertisement blocks or other elements.
+ Text Wrapping | Method of placing text around images where text automatically flows around illustrations according to page template rules.
+ Preview | Mode for viewing a finished issue before final approval, allowing to check all pages and elements.
+ Author | System user who creates and edits articles for publication.
+ Proofreader | System user who checks articles for spelling, punctuation, and style.
+ Illustrator | System user who works with images and illustrations for articles.
+ Layout Designer | System user who creates page layouts and places materials according to templates.
+ Editor-in-Chief | System user with rights for final approval of issues for publication.
+ Template JSON Validation | Rules for verifying that a JSON template is valid: all required fields must be present, column counts must match page width, ad and illustration slots must not overlap, and text flow rules must be consistent with the number of columns and fixed elements. Invalid templates are rejected by the system.
+
+
+
+
+
+

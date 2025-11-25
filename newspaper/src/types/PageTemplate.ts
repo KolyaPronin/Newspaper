@@ -54,3 +54,24 @@ export interface ColumnContainer {
   isFilled: boolean;
 }
 
+export interface LayoutIllustration {
+  illustrationId: string;
+  columnIndex: number;
+  positionIndex: number; // индекс позиции в illustrationPositions
+}
+
+export interface Layout {
+  id: string;
+  title: string;
+  templateId: string;
+  issueId?: string | null;
+  pageNumber?: number | null;
+  headerContent?: string;
+  footerContent?: string;
+  columns: ColumnContainer[][];
+  illustrations?: LayoutIllustration[]; // привязка иллюстраций к слотам
+  status: 'draft' | 'in_review' | 'published';
+  updatedAt: string;
+  createdAt: string;
+}
+

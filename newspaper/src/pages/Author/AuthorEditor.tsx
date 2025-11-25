@@ -24,7 +24,6 @@ const AuthorEditor: React.FC = () => {
         heading: {
           levels: [1, 2, 3, 4, 5, 6],
         },
-        // Отключаем встроенный Link из StarterKit, используем свой с автолинками
         link: false,
       }),
       TextAlign.configure({
@@ -56,7 +55,6 @@ const AuthorEditor: React.FC = () => {
     },
   });
 
-  // Загружаем статью при монтировании или изменении currentArticle
   useEffect(() => {
     if (!editor) return;
 
@@ -111,7 +109,6 @@ const AuthorEditor: React.FC = () => {
   const promptForLink = () => {
     if (!editor) return;
     const previousUrl = editor.getAttributes('link').href as string | undefined;
-    // eslint-disable-next-line no-alert
     const url = window.prompt('Введите ссылку', previousUrl ?? '');
     if (url === null) {
       return;
@@ -125,7 +122,6 @@ const AuthorEditor: React.FC = () => {
 
   const promptForImage = () => {
     if (!editor) return;
-    // eslint-disable-next-line no-alert
     const url = window.prompt('URL изображения');
     if (!url) return;
     editor.chain().focus().setImage({ src: url }).run();
@@ -135,7 +131,7 @@ const AuthorEditor: React.FC = () => {
     editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
   };
 
-  const handleSaveDraft = () => {
+  const handleSaveDraft = async () => {
     if (!editor || !title.trim()) {
       setSaveStatus('error');
       setTimeout(() => setSaveStatus('idle'), 2000);
@@ -146,7 +142,7 @@ const AuthorEditor: React.FC = () => {
     try {
       const content = editor.getHTML();
       const existingId = currentArticle?.id ? currentArticle.id : undefined;
-      const article = saveDraft(title.trim(), content, existingId);
+      const article = await saveDraft(title.trim(), content, existingId);
       setCurrentArticle(article);
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
@@ -169,11 +165,10 @@ const AuthorEditor: React.FC = () => {
       const content = editor.getHTML();
       let articleId = currentArticle?.id;
 
-      // Всегда сохраняем перед отправкой, чтобы зафиксировать текущую версию и статус "draft"
-      const savedArticle = saveDraft(title.trim(), content, currentArticle?.id);
+      const savedArticle = await saveDraft(title.trim(), content, currentArticle?.id);
       articleId = savedArticle.id;
 
-      submitForReview(articleId);
+      await submitForReview(articleId);
       setSubmitStatus('submitted');
       setTimeout(() => setSubmitStatus('idle'), 3000);
     } catch (error) {

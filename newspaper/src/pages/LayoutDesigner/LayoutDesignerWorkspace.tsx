@@ -1,25 +1,31 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useArticles } from '../../contexts/ArticleContext';
-import { PageTemplate, ColumnContainer } from '../../types/PageTemplate';
+import { PageTemplate, ColumnContainer, Layout, LayoutIllustration } from '../../types/PageTemplate';
 import { defaultPageTemplate } from '../../data/templates';
 import PageLayout from './PageLayout';
+import { layoutAPI, templateAPI, illustrationAPI, Illustration } from '../../utils/api';
 
 const LayoutDesignerWorkspace: React.FC = () => {
   const { articles } = useArticles();
-  const [template, setTemplate] = useState<PageTemplate | null>(null);
+  const [templates, setTemplates] = useState<PageTemplate[]>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<PageTemplate | null>(null);
   const [columns, setColumns] = useState<ColumnContainer[][]>([]);
   const [headerContent, setHeaderContent] = useState<string>('Заголовок газеты');
+  const [layoutTitle, setLayoutTitle] = useState<string>('Макет страницы');
+  const [templatesLoading, setTemplatesLoading] = useState<boolean>(false);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
+  const [layoutsLoading, setLayoutsLoading] = useState<boolean>(false);
+  const [currentLayoutId, setCurrentLayoutId] = useState<string | null>(null);
+  const [autoSaveMessage, setAutoSaveMessage] = useState<string | null>('Нет изменений');
+  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const skipAutoSaveRef = useRef<boolean>(false);
+  const [articleIllustrations, setArticleIllustrations] = useState<Record<string, Illustration[]>>({});
+  const [allIllustrations, setAllIllustrations] = useState<Illustration[]>([]);
+  const [layoutIllustrations, setLayoutIllustrations] = useState<LayoutIllustration[]>([]);
 
-  const approvedArticles = useMemo(
-    () => articles.filter(a => a.status === 'approved'),
-    [articles]
-  );
-
-  const handleLoadTemplate = () => {
-    setTemplate(defaultPageTemplate);
-    setHeaderContent(defaultPageTemplate.headers.content || 'Заголовок газеты');
+  const buildEmptyColumns = useCallback((template: PageTemplate): ColumnContainer[][] => {
     const initialColumns: ColumnContainer[][] = [];
-    for (let i = 0; i < defaultPageTemplate.columns; i++) {
+    for (let i = 0; i < template.columns; i++) {
       initialColumns.push([
         {
           id: `col_${i}_container_0`,
@@ -30,7 +36,184 @@ const LayoutDesignerWorkspace: React.FC = () => {
         },
       ]);
     }
-    setColumns(initialColumns);
+    return initialColumns;
+  }, []);
+
+  const resetLayoutForTemplate = useCallback((template: PageTemplate) => {
+    skipAutoSaveRef.current = true;
+    setColumns(buildEmptyColumns(template));
+    setHeaderContent(template.headers?.content || 'Заголовок газеты');
+    setLayoutTitle(`${template.name} макет`);
+    setCurrentLayoutId(null);
+    setLayoutIllustrations([]);
+    setAutoSaveMessage('Макет готов к редактированию');
+  }, [buildEmptyColumns]);
+
+  const applyLayout = useCallback((layout: Layout, fallbackTemplate?: PageTemplate | null) => {
+    skipAutoSaveRef.current = true;
+    setColumns(layout.columns || []);
+    setHeaderContent(layout.headerContent || fallbackTemplate?.headers?.content || 'Заголовок газеты');
+    setLayoutTitle(layout.title);
+    setCurrentLayoutId(layout.id);
+    setLayoutIllustrations(layout.illustrations || []);
+    setAutoSaveMessage('Загружен сохранённый макет');
+  }, []);
+
+  const approvedArticles = useMemo(
+    () => articles.filter(a => a.status === 'approved'),
+    [articles]
+  );
+
+  useEffect(() => {
+    const loadIllustrations = async () => {
+      const illustrationsMap: Record<string, Illustration[]> = {};
+      const allIlls: Illustration[] = [];
+      
+      for (const article of approvedArticles) {
+        try {
+          const illustrations = await illustrationAPI.getByArticle(article.id);
+          illustrationsMap[article.id] = illustrations;
+          allIlls.push(...illustrations);
+        } catch (error) {
+          console.error(`Failed to load illustrations for article ${article.id}:`, error);
+          illustrationsMap[article.id] = [];
+        }
+      }
+      
+      setArticleIllustrations(illustrationsMap);
+      setAllIllustrations(allIlls);
+    };
+
+    if (approvedArticles.length > 0) {
+      loadIllustrations();
+    } else {
+      setAllIllustrations([]);
+      setArticleIllustrations({});
+    }
+  }, [approvedArticles]);
+
+  const loadLayoutsForTemplate = useCallback(async (template: PageTemplate) => {
+    setLayoutsLoading(true);
+    try {
+      const layouts = await layoutAPI.getLayouts({ templateId: template.id, limit: 1 });
+      if (layouts.length > 0) {
+        applyLayout(layouts[0], template);
+      } else {
+        resetLayoutForTemplate(template);
+      }
+    } catch (error) {
+      console.error('Failed to load layouts', error);
+      resetLayoutForTemplate(template);
+      setAutoSaveMessage(error instanceof Error ? error.message : 'Не удалось загрузить макет');
+    } finally {
+      setLayoutsLoading(false);
+    }
+  }, [applyLayout, resetLayoutForTemplate]);
+
+  const fetchTemplates = useCallback(async () => {
+    setTemplatesLoading(true);
+    setTemplatesError(null);
+    try {
+      const fetchedTemplates = await templateAPI.getTemplates();
+      if (fetchedTemplates.length === 0) {
+        setTemplates([defaultPageTemplate]);
+        setSelectedTemplate(defaultPageTemplate);
+        resetLayoutForTemplate(defaultPageTemplate);
+      } else {
+        setTemplates(fetchedTemplates);
+        setSelectedTemplate((current) => {
+          if (!current) {
+            return fetchedTemplates[0];
+          }
+          return fetchedTemplates.find(t => t.id === current.id) || fetchedTemplates[0];
+        });
+      }
+    } catch (error) {
+      const fallbackTemplate = defaultPageTemplate;
+      setTemplates([fallbackTemplate]);
+      setSelectedTemplate(fallbackTemplate);
+      resetLayoutForTemplate(fallbackTemplate);
+      setTemplatesError(error instanceof Error ? error.message : 'Не удалось загрузить шаблоны');
+    } finally {
+      setTemplatesLoading(false);
+    }
+  }, [resetLayoutForTemplate]);
+
+  useEffect(() => {
+    fetchTemplates();
+  }, [fetchTemplates]);
+
+  useEffect(() => {
+    if (!selectedTemplate) {
+      return;
+    }
+    loadLayoutsForTemplate(selectedTemplate);
+  }, [selectedTemplate, loadLayoutsForTemplate]);
+
+  useEffect(() => {
+    if (!selectedTemplate) return;
+    if (layoutsLoading || templatesLoading) return;
+    if (skipAutoSaveRef.current) {
+      skipAutoSaveRef.current = false;
+      return;
+    }
+
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current);
+    }
+
+    autoSaveTimeoutRef.current = setTimeout(async () => {
+      try {
+        const payload = {
+          templateId: selectedTemplate.id,
+          title: layoutTitle || `${selectedTemplate.name} макет`,
+          columns,
+          headerContent,
+          illustrations: layoutIllustrations,
+        };
+
+        let saved: Layout;
+        if (currentLayoutId) {
+          saved = await layoutAPI.updateLayout(currentLayoutId, payload);
+        } else {
+          saved = await layoutAPI.createLayout(payload);
+        }
+        setCurrentLayoutId(saved.id);
+        setLayoutTitle(saved.title);
+        setAutoSaveMessage('Изменения сохранены');
+      } catch (error) {
+        console.error('Failed to auto-save layout', error);
+        setAutoSaveMessage(error instanceof Error ? error.message : 'Ошибка сохранения макета');
+      }
+    }, 1200);
+
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+      }
+    };
+  }, [
+    selectedTemplate,
+    columns,
+    headerContent,
+    layoutTitle,
+    layoutIllustrations,
+    currentLayoutId,
+    layoutsLoading,
+    templatesLoading,
+  ]);
+
+  const handleTemplateChange = (templateId: string) => {
+    const next = templates.find(t => t.id === templateId);
+    if (next) {
+      setSelectedTemplate(next);
+    }
+  };
+
+  const handleReloadTemplate = () => {
+    if (selectedTemplate) {
+      loadLayoutsForTemplate(selectedTemplate);
+    }
   };
 
   const CHARS_PER_COLUMN = 800;
@@ -304,7 +487,7 @@ const LayoutDesignerWorkspace: React.FC = () => {
 
   const handleDropArticle = (articleId: string, columnIndex: number, containerIndex: number) => {
     const article = articles.find(a => a.id === articleId);
-    if (!article || !template) return;
+    if (!article || !selectedTemplate) return;
 
     const newColumns = columns.map(col => col.map(cont => ({ ...cont })));
     const column = newColumns[columnIndex];
@@ -339,7 +522,7 @@ const LayoutDesignerWorkspace: React.FC = () => {
       let currentColIndex = columnIndex;
       
       for (let i = 1; i < contentParts.length; i++) {
-        currentColIndex = (currentColIndex + 1) % template.columns;
+        currentColIndex = (currentColIndex + 1) % selectedTemplate.columns;
         
         let foundContainer = false;
         for (let j = 0; j < newColumns[currentColIndex].length; j++) {
@@ -390,7 +573,7 @@ const LayoutDesignerWorkspace: React.FC = () => {
       for (let i = container.isFilled ? 1 : 0; i < contentParts.length; i++) {
         if (i === 0 && container.isFilled) continue;
         
-        currentColIndex = (currentColIndex + 1) % template.columns;
+        currentColIndex = (currentColIndex + 1) % selectedTemplate.columns;
         
         let foundContainer = false;
         for (let j = 0; j < newColumns[currentColIndex].length; j++) {
@@ -434,24 +617,98 @@ const LayoutDesignerWorkspace: React.FC = () => {
     setColumns(newColumns);
   };
 
+  const handleDropIllustration = (illustrationId: string, columnIndex: number, positionIndex: number) => {
+    const illustration = allIllustrations.find(ill => ill.id === illustrationId);
+    if (!illustration || !selectedTemplate) return;
+
+    const positions = selectedTemplate.illustrationPositions.filter(
+      pos => pos.allowedColumns.includes(columnIndex)
+    );
+    if (positionIndex >= positions.length) return;
+
+    const newLayoutIllustrations = layoutIllustrations.filter(
+      li => !(li.columnIndex === columnIndex && li.positionIndex === positionIndex) &&
+            li.illustrationId !== illustrationId
+    );
+
+    newLayoutIllustrations.push({
+      illustrationId,
+      columnIndex,
+      positionIndex,
+    });
+
+    setLayoutIllustrations(newLayoutIllustrations);
+  };
+
+  const handleDeleteIllustration = (columnIndex: number, positionIndex: number) => {
+    const newLayoutIllustrations = layoutIllustrations.filter(
+      li => !(li.columnIndex === columnIndex && li.positionIndex === positionIndex)
+    );
+    setLayoutIllustrations(newLayoutIllustrations);
+  };
+
   return (
     <div className="layout-designer-workspace">
-      <div className="workspace-header">
+      <div className="workspace-header" style={{ flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
         <div>
           <h1>Верстка страницы</h1>
-          <p>Загрузите шаблон и разместите материалы на странице</p>
+          <p>Выберите шаблон и загрузите макет из базы</p>
         </div>
-        {!template && (
-          <button type="button" className="btn-create" onClick={handleLoadTemplate}>
-            <span>📄</span> Загрузить шаблон
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: 'var(--subtext)' }}>
+            Шаблон
+            <select
+              value={selectedTemplate?.id || ''}
+              onChange={(e) => handleTemplateChange(e.target.value)}
+              disabled={templatesLoading || templates.length === 0}
+              style={{ 
+                minWidth: 220, 
+                padding: '6px 10px', 
+                borderRadius: 6, 
+                border: '1px solid var(--border)',
+                background: '#0e1016',
+                color: 'var(--text)',
+                fontSize: 14
+              }}
+            >
+              {templates.map(t => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </label>
+          <button type="button" className="btn" onClick={handleReloadTemplate} disabled={!selectedTemplate || layoutsLoading} style={{ width: 'auto' }}>
+            {layoutsLoading ? 'Загрузка...' : 'Загрузить шаблон'}
           </button>
-        )}
+        </div>
       </div>
 
-      {!template ? (
+      {templatesError && (
+        <div style={{ marginBottom: 16, padding: '10px 14px', background: '#FEF3C7', border: '1px solid #FCD34D', borderRadius: 8, color: '#92400E' }}>
+          {templatesError}. Используется локальный шаблон по умолчанию.
+        </div>
+      )}
+
+      <div style={{ 
+        marginBottom: 16, 
+        padding: '8px 12px', 
+        border: '1px solid var(--border)', 
+        borderRadius: 8, 
+        background: 'rgba(21, 24, 33, 0.3)', 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center', 
+        fontSize: 13 
+      }}>
+        <span style={{ color: 'var(--subtext)' }}>Автосохранение: {autoSaveMessage}</span>
+        <button type="button" className="btn" onClick={fetchTemplates} disabled={templatesLoading} style={{ padding: '6px 12px', fontSize: 13, width: 'auto' }}>
+          {templatesLoading ? 'Обновляю...' : 'Обновить'}
+        </button>
+      </div>
+
+      {!selectedTemplate ? (
         <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--subtext)' }}>
-          <p style={{ fontSize: 18, marginBottom: 12 }}>Шаблон не загружен</p>
-          <p style={{ fontSize: 14 }}>Нажмите «Загрузить шаблон» чтобы начать работу</p>
+          <p style={{ fontSize: 18, marginBottom: 12 }}>Шаблоны не найдены</p>
+          <p style={{ fontSize: 14 }}>Добавьте шаблон через API или используйте локальный.</p>
         </div>
       ) : (
         <div className="layout-workspace-content">
@@ -478,15 +735,83 @@ const LayoutDesignerWorkspace: React.FC = () => {
                 ))}
               </div>
             )}
+            
+            <div style={{ marginTop: 24, paddingTop: 24, borderTop: '1px solid rgba(38, 42, 54, 0.3)' }}>
+              <h3 style={{ marginBottom: 12, fontSize: 14, fontWeight: 600 }}>Иллюстрации</h3>
+              {allIllustrations.length === 0 ? (
+                <p className="article-empty" style={{ fontSize: 12 }}>Нет доступных иллюстраций</p>
+              ) : (
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: 'repeat(2, 1fr)', 
+                  gap: 8,
+                  maxHeight: '300px',
+                  overflowY: 'auto',
+                }}>
+                  {allIllustrations.map(ill => (
+                    <div
+                      key={ill.id}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('illustrationId', ill.id);
+                      }}
+                      style={{
+                        cursor: 'grab',
+                        border: '1px solid rgba(38, 42, 54, 0.4)',
+                        borderRadius: 6,
+                        overflow: 'hidden',
+                        background: 'rgba(14, 16, 22, 0.5)',
+                        transition: 'all 0.2s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = 'var(--accent)';
+                        e.currentTarget.style.transform = 'scale(1.02)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = 'rgba(38, 42, 54, 0.4)';
+                        e.currentTarget.style.transform = 'scale(1)';
+                      }}
+                    >
+                      <img
+                        src={ill.url}
+                        alt={ill.caption || ''}
+                        style={{
+                          width: '100%',
+                          height: 60,
+                          objectFit: 'cover',
+                          display: 'block',
+                        }}
+                      />
+                      {ill.caption && (
+                        <div style={{
+                          padding: '4px 6px',
+                          fontSize: 10,
+                          color: 'var(--subtext)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {ill.caption}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <div className="layout-page-area">
             <PageLayout
-              template={template}
+              template={selectedTemplate}
               columns={columns}
               onDropArticle={handleDropArticle}
               onDeleteContainer={handleDeleteContainer}
               headerContent={headerContent}
               onHeaderChange={setHeaderContent}
+              illustrations={allIllustrations}
+              layoutIllustrations={layoutIllustrations}
+              onDropIllustration={handleDropIllustration}
+              onDeleteIllustration={handleDeleteIllustration}
             />
           </div>
         </div>

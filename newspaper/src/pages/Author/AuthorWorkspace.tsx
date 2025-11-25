@@ -23,7 +23,7 @@ const formatStatus = (status: Article['status']) => {
 
 const AuthorWorkspace: React.FC = () => {
   const { user } = useAuth();
-  const { articles, currentArticle, setCurrentArticle } = useArticles();
+  const { articles, currentArticle, setCurrentArticle, loading, error } = useArticles();
 
   const drafts = useMemo(
     () => articles.filter(a => a.authorId === user?.id && a.status === 'draft'),
@@ -113,17 +113,35 @@ const AuthorWorkspace: React.FC = () => {
         </button>
       </div>
 
-      <div className="articles-layout">
-        <div className="articles-sidebar">
-          {renderSection('Черновики', drafts, 'Нет черновиков')}
-          {renderSection('На доработке', needsRevision, 'Нет статей на доработке')}
-          {renderSection('На проверке', inReview, 'Нет статей на проверке', false)}
-          {renderSection('Одобрено', approved, 'Нет одобренных', false)}
+      {error && (
+        <div style={{ 
+          padding: '12px 16px', 
+          background: '#fee2e2', 
+          border: '1px solid #fca5a5', 
+          borderRadius: 8, 
+          marginBottom: 16,
+          color: '#991b1b'
+        }}>
+          Ошибка загрузки статей: {error}
         </div>
-        <div className="articles-editor">
-          <AuthorEditor />
+      )}
+      {loading && articles.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '40px 20px' }}>
+          <p>Загрузка статей...</p>
         </div>
-      </div>
+      ) : (
+        <div className="articles-layout">
+          <div className="articles-sidebar">
+            {renderSection('Черновики', drafts, 'Нет черновиков')}
+            {renderSection('На доработке', needsRevision, 'Нет статей на доработке')}
+            {renderSection('На проверке', inReview, 'Нет статей на проверке', false)}
+            {renderSection('Одобрено', approved, 'Нет одобренных', false)}
+          </div>
+          <div className="articles-editor">
+            <AuthorEditor />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

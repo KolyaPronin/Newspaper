@@ -1,20 +1,24 @@
-import React, { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback } from 'react';
 import { Article } from '../types/Article';
 import { useAuth } from './AuthContexts';
+import { articleAPI, transformArticle } from '../utils/api';
 
 interface ArticleContextType {
   articles: Article[];
   currentArticle: Article | null;
+  loading: boolean;
+  error: string | null;
   setCurrentArticle: (article: Article | null) => void;
-  saveDraft: (title: string, content: string, articleId?: string) => Article;
-  submitForReview: (articleId: string) => void;
-  loadArticle: (articleId: string) => Article | null;
+  saveDraft: (title: string, content: string, articleId?: string) => Promise<Article>;
+  submitForReview: (articleId: string) => Promise<void>;
+  loadArticle: (articleId: string) => Promise<Article | null>;
   getDraftsByAuthor: (authorId: string) => Article[];
   getArticlesByStatus: (status: Article['status']) => Article[];
   getArticlesByAuthor: (authorId: string) => Article[];
-  updateArticleContent: (articleId: string, content: string) => Article;
-  approveArticle: (articleId: string) => void;
-  requestRevision: (articleId: string) => void;
+  updateArticleContent: (articleId: string, content: string) => Promise<Article>;
+  approveArticle: (articleId: string) => Promise<void>;
+  requestRevision: (articleId: string) => Promise<void>;
+  refreshArticles: () => Promise<void>;
 }
 
 const ArticleContext = createContext<ArticleContextType | undefined>(undefined);
@@ -23,111 +27,136 @@ interface ArticleProviderProps {
   children: ReactNode;
 }
 
-const STORAGE_KEY = 'newspaper_articles';
-
 export const ArticleProvider: React.FC<ArticleProviderProps> = ({ children }) => {
   const [articles, setArticles] = useState<Article[]>([]);
   const [currentArticle, setCurrentArticle] = useState<Article | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
   const { user } = useAuth();
 
-  // Загружаем статьи из localStorage при монтировании
+  const refreshArticles = useCallback(async () => {
+    if (!user) {
+      setArticles([]);
+      setCurrentArticle(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      const apiArticles = await articleAPI.getArticles();
+      const transformedArticles = apiArticles.map(transformArticle);
+      setArticles(transformedArticles);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load articles';
+      setError(errorMessage);
+      console.error('Failed to load articles:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        console.log('Loading articles from localStorage:', parsed.length, 'articles');
-        // Преобразуем строки дат обратно в Date объекты
-        const articlesWithDates = parsed.map((a: any) => ({
-          ...a,
-          createdAt: new Date(a.createdAt),
-          updatedAt: new Date(a.updatedAt),
-        }));
-        console.log('Loaded articles:', articlesWithDates.map((a: Article) => ({ id: a.id, title: a.title, authorId: a.authorId, status: a.status })));
-        setArticles(articlesWithDates);
-      } catch (e) {
-        console.error('Failed to load articles from storage', e);
-      }
+    if (user) {
+    refreshArticles();
     } else {
-      console.log('No articles found in localStorage');
+      setArticles([]);
+      setCurrentArticle(null);
+      setLoading(false);
+      setError(null);
     }
-  }, []);
+  }, [user, refreshArticles]);
 
-  // Сохраняем статьи в localStorage при изменении
-  useEffect(() => {
-    if (articles.length > 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(articles));
-      console.log('Articles saved to localStorage:', articles.length, 'articles');
-    }
-  }, [articles]);
-
-  const saveDraft = (title: string, content: string, articleId?: string): Article => {
+  const saveDraft = async (title: string, content: string, articleId?: string): Promise<Article> => {
     if (!user) {
       throw new Error('User must be logged in to save articles');
     }
 
-    const now = new Date();
-    let article: Article;
+    setLoading(true);
+    setError(null);
+    try {
+      let apiArticle;
+      if (articleId && articleId.trim() !== '') {
+        apiArticle = await articleAPI.updateArticle(articleId, { title, content });
+      } else {
+        apiArticle = await articleAPI.createArticle({
+          title,
+          content,
+          authorId: user.id,
+        });
+      }
 
-    if (articleId) {
-      // Обновляем существующую статью
-      const existing = articles.find(a => a.id === articleId);
-      article = {
-        ...existing,
-        id: articleId,
-        title,
-        content,
-        status: 'draft',
-        authorId: existing?.authorId ?? user.id,
-        createdAt: existing?.createdAt ?? now,
-        updatedAt: now,
-      } as Article;
-      setArticles(prev => prev.map(a => a.id === articleId ? article : a));
-    } else {
-      // Создаем новую статью
-      article = {
-        id: `article_${Date.now()}`,
-        title,
-        content,
-        status: 'draft',
-        authorId: user.id,
-        createdAt: now,
-        updatedAt: now,
-      };
-      setArticles(prev => [...prev, article]);
-    }
+      const article = transformArticle(apiArticle);
+      
+      setArticles(prev => {
+        const existingIndex = prev.findIndex(a => a.id === article.id);
+        if (existingIndex >= 0) {
+          return prev.map(a => a.id === article.id ? article : a);
+        }
+        return [...prev, article];
+      });
 
-    setCurrentArticle(article);
-    return article;
-  };
-
-  const submitForReview = (articleId: string) => {
-    const article = articles.find(a => a.id === articleId);
-    if (!article) {
-      throw new Error('Article not found');
-    }
-
-    if (article.status !== 'draft') {
-      throw new Error('Only draft articles can be submitted for review');
-    }
-
-    const updated: Article = {
-      ...article,
-      status: 'under_review',
-      updatedAt: new Date(),
-    };
-
-    setArticles(prev => prev.map(a => a.id === articleId ? updated : a));
-    setCurrentArticle(updated);
-  };
-
-  const loadArticle = (articleId: string): Article | null => {
-    const article = articles.find(a => a.id === articleId);
-    if (article) {
       setCurrentArticle(article);
       return article;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to save article';
+      setError(errorMessage);
+      throw err;
+    } finally {
+      setLoading(false);
     }
-    return null;
+  };
+
+  const submitForReview = async (articleId: string): Promise<void> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const apiArticle = await articleAPI.submitForReview(articleId);
+      const article = transformArticle(apiArticle);
+      
+      setArticles(prev => prev.map(a => a.id === articleId ? article : a));
+      setCurrentArticle(article);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to submit article for review';
+      setError(errorMessage);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadArticle = async (articleId: string): Promise<Article | null> => {
+    const cachedArticle = articles.find(a => a.id === articleId);
+    if (cachedArticle) {
+      setCurrentArticle(cachedArticle);
+      return cachedArticle;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      const apiArticle = await articleAPI.getArticleById(articleId);
+      const article = transformArticle(apiArticle);
+      
+      setArticles(prev => {
+        const existingIndex = prev.findIndex(a => a.id === article.id);
+        if (existingIndex >= 0) {
+          return prev.map(a => a.id === article.id ? article : a);
+        }
+        return [...prev, article];
+      });
+
+      setCurrentArticle(article);
+      return article;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load article';
+      setError(errorMessage);
+      return null;
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getDraftsByAuthor = (authorId: string): Article[] => {
@@ -142,63 +171,59 @@ export const ArticleProvider: React.FC<ArticleProviderProps> = ({ children }) =>
     return articles.filter(a => a.authorId === authorId);
   };
 
-  const updateArticleContent = (articleId: string, content: string): Article => {
-    const article = articles.find(a => a.id === articleId);
-    if (!article) {
-      throw new Error('Article not found');
+  const updateArticleContent = async (articleId: string, content: string): Promise<Article> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const apiArticle = await articleAPI.updateArticle(articleId, { content });
+      const article = transformArticle(apiArticle);
+      
+      setArticles(prev => prev.map(a => a.id === articleId ? article : a));
+      setCurrentArticle(article);
+      return article;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to update article';
+      setError(errorMessage);
+      throw err;
+    } finally {
+      setLoading(false);
     }
-
-    const updated: Article = {
-      ...article,
-      content,
-      updatedAt: new Date(),
-    };
-
-    setArticles(prev => prev.map(a => a.id === articleId ? updated : a));
-    setCurrentArticle(updated);
-    return updated;
   };
 
-  const approveArticle = (articleId: string) => {
-    const article = articles.find(a => a.id === articleId);
-    if (!article) {
-      throw new Error('Article not found');
+  const approveArticle = async (articleId: string): Promise<void> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const apiArticle = await articleAPI.approveArticle(articleId);
+      const article = transformArticle(apiArticle);
+      
+      setArticles(prev => prev.map(a => a.id === articleId ? article : a));
+      setCurrentArticle(article);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to approve article';
+      setError(errorMessage);
+      throw err;
+    } finally {
+      setLoading(false);
     }
-
-    const updated: Article = {
-      ...article,
-      status: 'approved',
-      updatedAt: new Date(),
-    };
-
-    setArticles(prev => prev.map(a => a.id === articleId ? updated : a));
-    setCurrentArticle(updated);
   };
 
-  const requestRevision = (articleId: string): Article => {
-    const article = articles.find(a => a.id === articleId);
-    if (!article) {
-      throw new Error('Article not found');
+  const requestRevision = async (articleId: string): Promise<void> => {
+    setLoading(true);
+    setError(null);
+    try {
+      const apiArticle = await articleAPI.requestRevision(articleId);
+      const article = transformArticle(apiArticle);
+      
+      setArticles(prev => prev.map(a => a.id === articleId ? article : a));
+      setCurrentArticle(null);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to request revision';
+      setError(errorMessage);
+      throw err;
+    } finally {
+      setLoading(false);
     }
-
-    const updated: Article = {
-      ...article,
-      status: 'needs_revision',
-      updatedAt: new Date(),
-    };
-
-    console.log('Requesting revision for article:', articleId, 'Author:', updated.authorId, 'Status:', updated.status);
-    
-    setArticles(prev => {
-      const newArticles = prev.map(a => a.id === articleId ? updated : a);
-      console.log('Updated articles array:', newArticles.length, 'articles');
-      console.log('Articles with needs_revision:', newArticles.filter(a => a.status === 'needs_revision').map(a => ({ id: a.id, authorId: a.authorId, status: a.status })));
-      return newArticles;
-    });
-    
-    // Очищаем текущую статью у профридера после возврата
-    setCurrentArticle(null);
-    return updated;
   };
 
   return (
@@ -206,6 +231,8 @@ export const ArticleProvider: React.FC<ArticleProviderProps> = ({ children }) =>
       value={{
         articles,
         currentArticle,
+        loading,
+        error,
         setCurrentArticle,
         saveDraft,
         submitForReview,
@@ -216,6 +243,7 @@ export const ArticleProvider: React.FC<ArticleProviderProps> = ({ children }) =>
         updateArticleContent,
         approveArticle,
         requestRevision,
+        refreshArticles,
       }}
     >
       {children}

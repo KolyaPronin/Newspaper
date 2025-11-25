@@ -1,5 +1,6 @@
 import React from 'react';
-import { PageTemplate, ColumnContainer } from '../../types/PageTemplate';
+import { PageTemplate, ColumnContainer, LayoutIllustration } from '../../types/PageTemplate';
+import { Illustration } from '../../utils/api';
 
 export interface PageLayoutProps {
   template: PageTemplate;
@@ -8,9 +9,24 @@ export interface PageLayoutProps {
   onDeleteContainer?: (columnIndex: number, containerIndex: number) => void;
   headerContent: string;
   onHeaderChange: (content: string) => void;
+  illustrations?: Illustration[];
+  layoutIllustrations?: LayoutIllustration[];
+  onDropIllustration?: (illustrationId: string, columnIndex: number, positionIndex: number) => void;
+  onDeleteIllustration?: (columnIndex: number, positionIndex: number) => void;
 }
 
-const PageLayout: React.FC<PageLayoutProps> = ({ template, columns, onDropArticle, onDeleteContainer, headerContent, onHeaderChange }) => {
+const PageLayout: React.FC<PageLayoutProps> = ({ 
+  template, 
+  columns, 
+  onDropArticle, 
+  onDeleteContainer, 
+  headerContent, 
+  onHeaderChange,
+  illustrations = [],
+  layoutIllustrations = [],
+  onDropIllustration,
+  onDeleteIllustration,
+}) => {
   const handleDrop = (e: React.DragEvent, columnIndex: number, containerIndex: number) => {
     e.preventDefault();
     const articleId = e.dataTransfer.getData('articleId');
@@ -19,9 +35,27 @@ const PageLayout: React.FC<PageLayoutProps> = ({ template, columns, onDropArticl
     }
   };
 
+  const handleIllustrationDrop = (e: React.DragEvent, columnIndex: number, positionIndex: number) => {
+    e.preventDefault();
+    const illustrationId = e.dataTransfer.getData('illustrationId');
+    if (illustrationId && onDropIllustration) {
+      onDropIllustration(illustrationId, columnIndex, positionIndex);
+    }
+  };
+
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
+  };
+
+  const getIllustrationForSlot = (columnIndex: number, positionIndex: number): Illustration | null => {
+    const layoutIll = layoutIllustrations.find(
+      li => li.columnIndex === columnIndex && li.positionIndex === positionIndex
+    );
+    if (layoutIll) {
+      return illustrations.find(ill => ill.id === layoutIll.illustrationId) || null;
+    }
+    return null;
   };
 
   const columnWidth = `calc((100% - ${(template.columns - 1) * 16}px) / ${template.columns})`;
@@ -189,28 +223,75 @@ const PageLayout: React.FC<PageLayoutProps> = ({ template, columns, onDropArticl
               
               {template.illustrationPositions
                 .filter(pos => pos.allowedColumns.includes(colIndex))
-                .map((pos, idx) => (
-                  <div
-                    key={`illus_${colIndex}_${idx}`}
-                    className="illustration-slot"
-                    style={{
-                      width: '100%',
-                      height: '120px',
-                      border: '2px dashed #4ecdc4',
-                      background: 'rgba(78, 205, 196, 0.1)',
-                      borderRadius: '6px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '11px',
-                      color: '#4ecdc4',
-                      flexShrink: 0,
-                      marginTop: idx > 0 ? '12px' : '0',
-                    }}
-                  >
-                    Иллюстрация
-                  </div>
-                ))}
+                .map((pos, idx) => {
+                  const illustration = getIllustrationForSlot(colIndex, idx);
+                  return (
+                    <div
+                      key={`illus_${colIndex}_${idx}`}
+                      className="illustration-slot"
+                      onDrop={(e) => handleIllustrationDrop(e, colIndex, idx)}
+                      onDragOver={handleDragOver}
+                      style={{
+                        width: '100%',
+                        height: '120px',
+                        border: illustration ? '2px solid #4ecdc4' : '2px dashed #4ecdc4',
+                        background: illustration ? 'rgba(78, 205, 196, 0.2)' : 'rgba(78, 205, 196, 0.1)',
+                        borderRadius: '6px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '11px',
+                        color: '#4ecdc4',
+                        flexShrink: 0,
+                        marginTop: idx > 0 ? '12px' : '0',
+                        position: 'relative',
+                        overflow: 'hidden',
+                        cursor: illustration ? 'default' : 'pointer',
+                      }}
+                    >
+                      {illustration ? (
+                        <>
+                          <img
+                            src={illustration.url}
+                            alt={illustration.caption || ''}
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover',
+                            }}
+                          />
+                          {onDeleteIllustration && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteIllustration(colIndex, idx);
+                              }}
+                              style={{
+                                position: 'absolute',
+                                top: '4px',
+                                right: '4px',
+                                background: 'rgba(255, 107, 107, 0.9)',
+                                border: 'none',
+                                borderRadius: '4px',
+                                color: 'white',
+                                cursor: 'pointer',
+                                padding: '4px 8px',
+                                fontSize: '10px',
+                                fontWeight: 500,
+                                zIndex: 10,
+                              }}
+                              title="Удалить иллюстрацию"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <span>Иллюстрация</span>
+                      )}
+                    </div>
+                  );
+                })}
             </div>
           );
         })}

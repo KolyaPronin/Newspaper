@@ -1,0 +1,35 @@
+# Global ignores for the monorepo
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.temp
+
+# Environment files
+.env
+.env.*
+
+# Editor folders
+.idea/
+.vscode/
+
+# Build artifacts
+dist/
+build/
+
+# Frontend dependencies/outputs
+newspaper/node_modules/
+newspaper/coverage/
+newspaper/build/
+
+# Backend dependencies/outputs
+newspaper_backend/node_modules/
+newspaper_backend/uploads/*
+!newspaper_backend/uploads/.gitkeep
+
+# Misc
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+*** End Patch
+

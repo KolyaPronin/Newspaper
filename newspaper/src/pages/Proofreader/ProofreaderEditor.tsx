@@ -126,7 +126,7 @@ const ProofreaderEditor: React.FC = () => {
     editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!editor || !currentArticle) {
       setSaveStatus('error');
       setTimeout(() => setSaveStatus('idle'), 2000);
@@ -136,7 +136,7 @@ const ProofreaderEditor: React.FC = () => {
     setSaveStatus('saving');
     try {
       const content = editor.getHTML();
-      updateArticleContent(currentArticle.id, content);
+      await updateArticleContent(currentArticle.id, content);
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
     } catch (error) {
@@ -146,11 +146,11 @@ const ProofreaderEditor: React.FC = () => {
     }
   };
 
-  const handleApprove = () => {
+  const handleApprove = async () => {
     if (!currentArticle) return;
     setApproveStatus('processing');
     try {
-      approveArticle(currentArticle.id);
+      await approveArticle(currentArticle.id);
       setApproveStatus('done');
       setTimeout(() => setApproveStatus('idle'), 3000);
     } catch (error) {
@@ -160,11 +160,11 @@ const ProofreaderEditor: React.FC = () => {
     }
   };
 
-  const handleReturn = () => {
+  const handleReturn = async () => {
     if (!currentArticle) return;
     setReturnStatus('processing');
     try {
-      requestRevision(currentArticle.id);
+      await requestRevision(currentArticle.id);
       setCurrentArticle(null);
       setReturnStatus('done');
       setTimeout(() => setReturnStatus('idle'), 3000);

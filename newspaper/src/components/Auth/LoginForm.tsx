@@ -1,74 +1,51 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContexts';
-import { mockUsers } from '../../data/users';
-import { User, UserRole } from '../../types/User';
 
 const LoginForm: React.FC = () => {
-  const { login } = useAuth();
-  const [username, setUsername] = useState<string>('');
+  const { login, loading } = useAuth();
+  const [identifier, setIdentifier] = useState<string>('');
   const [password, setPassword] = useState<string>('');
-  const [role, setRole] = useState<UserRole | ''>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const roleOptions = useMemo<UserRole[]>(() => {
-    // берем роли из enum, чтобы были все доступные, а не только из моков
-    return [
-      UserRole.AUTHOR,
-      UserRole.PROOFREADER,
-      UserRole.ILLUSTRATOR,
-      UserRole.LAYOUT_DESIGNER,
-      UserRole.CHIEF_EDITOR
-    ];
-  }, []);
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Временно: эмулируем вход без сервера.
-    // Если поля пусты, можно подставить из моков для удобства.
-    let selectedRole = role || mockUsers[0].role;
-    let finalUsername = username.trim() || `user_${selectedRole}`;
-    
-    // Ищем пользователя в моках по роли, или создаем стабильный ID на основе username + role
-    const mockUser = mockUsers.find(u => u.role === selectedRole);
-    let userId: string;
-    
-    if (mockUser) {
-      // Используем ID из моков для стабильности
-      userId = mockUser.id;
-      finalUsername = mockUser.username;
-    } else {
-      // Создаем стабильный ID на основе username + role (hash)
-      const hash = `${finalUsername}_${selectedRole}`.split('').reduce((acc, char) => {
-        acc = ((acc << 5) - acc) + char.charCodeAt(0);
-        return acc & acc;
-      }, 0);
-      userId = `user_${Math.abs(hash)}`;
+    if (!identifier.trim() || !password.trim()) {
+      setError('请输入邮箱或用户名以及密码');
+      return;
     }
-    
-    const user: User = {
-      id: userId,
-      username: finalUsername,
-      email: `${finalUsername}@local`,
-      role: selectedRole
-    };
-    login(user);
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      if (identifier.includes('@')) {
+        await login({ email: identifier.trim(), password: password.trim() });
+      } else {
+        await login({ username: identifier.trim(), password: password.trim() });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '登录失败，请重试');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
     <div className="auth-container">
       <div className="auth-card">
         <h1 className="auth-title">Вход</h1>
-        <p className="auth-subtitle">Введите данные и выберите роль</p>
+        <p className="auth-subtitle">使用注册好的邮箱/用户名登录系统</p>
         <form className="auth-form" onSubmit={handleSubmit}>
           <div className="field">
-            <label className="label" htmlFor="username">Логин</label>
+            <label className="label" htmlFor="identifier">邮箱或用户名</label>
             <input
-              id="username"
+              id="identifier"
               className="input"
               type="text"
-              placeholder="например, ivan"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoComplete="username"
+              placeholder="例如：ivan@newspaper.zeta"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              autoComplete="username email"
             />
           </div>
           <div className="field">
@@ -83,21 +60,13 @@ const LoginForm: React.FC = () => {
               autoComplete="current-password"
             />
           </div>
-          <div className="field">
-            <label className="label" htmlFor="role">Роль</label>
-            <select
-              id="role"
-              className="select"
-              value={role}
-              onChange={(e) => setRole(e.target.value as UserRole)}
-            >
-              <option value="" disabled>Выберите роль</option>
-              {roleOptions.map(r => (
-                <option key={r} value={r}>{r}</option>
-              ))}
-            </select>
-          </div>
-          <button type="submit" className="btn">Войти</button>
+          {error && <p style={{ color: '#f87171', fontSize: 14, marginBottom: 12 }}>{error}</p>}
+          <button type="submit" className="btn" disabled={isSubmitting || loading}>
+            {isSubmitting ? '登录中...' : '登录'}
+          </button>
+          <p style={{ fontSize: 12, color: 'var(--subtext)', marginTop: 12 }}>
+            默认测试账号：`ivan@newspaper.zeta / password123`
+          </p>
         </form>
       </div>
     </div>

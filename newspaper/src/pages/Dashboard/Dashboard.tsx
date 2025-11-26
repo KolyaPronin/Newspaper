@@ -8,7 +8,18 @@ import ProofreaderWorkspace from '../Proofreader/ProofreaderWorkspace';
 import LayoutDesignerWorkspace from '../LayoutDesigner/LayoutDesignerWorkspace';
 
 const Dashboard: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="dashboard">
+        <header className="app-header">
+          <h1>NEWSPAPER</h1>
+          <p>Загружаем данные...</p>
+        </header>
+      </div>
+    );
+  }
 
   if (!user) {
     return (

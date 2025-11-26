@@ -15,7 +15,15 @@ export interface User {
 
 export interface AuthContextType {
   user: User | null;
-  login: (user: User) => void;
+  token: string | null;
+  loading: boolean;
+  login: (payload: LoginPayload) => Promise<void>;
   logout: () => void;
   hasRole: (role: UserRole) => boolean;
+}
+
+export interface LoginPayload {
+  email?: string;
+  username?: string;
+  password: string;
 }

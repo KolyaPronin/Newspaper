@@ -4,6 +4,7 @@ import { PageTemplate, ColumnContainer, Layout, LayoutIllustration } from '../..
 import { defaultPageTemplate } from '../../data/templates';
 import PageLayout from './PageLayout';
 import { layoutAPI, templateAPI, illustrationAPI, Illustration } from '../../utils/api';
+import { CHARS_PER_COLUMN, LINES_PER_COLUMN, getTextLength, getTextLines, splitContentToFitContainer, splitContentToFitWithRemaining } from '../../hooks/useContentSplitting';
 
 const LayoutDesignerWorkspace: React.FC = () => {
   const { articles } = useArticles();
@@ -216,8 +217,7 @@ const LayoutDesignerWorkspace: React.FC = () => {
     }
   };
 
-  const CHARS_PER_COLUMN = 800;
-  const LINES_PER_COLUMN = 20;
+  // Используем константы из useContentSplitting
   
   const splitContentIntoContainers = (htmlContent: string): string[] => {
     const parser = new DOMParser();
@@ -477,12 +477,37 @@ const LayoutDesignerWorkspace: React.FC = () => {
     const column = newColumns[columnIndex];
     
     if (column[containerIndex]) {
-      column[containerIndex].content = '';
-      column[containerIndex].articleId = undefined;
-      column[containerIndex].isFilled = false;
+      // Удаляем контейнер
+      column.splice(containerIndex, 1);
+      
+      // Если колонка пустая, создаем один пустой контейнер
+      if (column.length === 0) {
+        column.push({
+          id: `col_${columnIndex}_container_0`,
+          columnIndex,
+          content: '',
+          height: 0,
+          isFilled: false,
+        });
+      }
       
       setColumns(newColumns);
     }
+  };
+
+  // Вычисляет общую занятость колонки (сумма всех заполненных контейнеров)
+  const getColumnUsedSpace = (column: ColumnContainer[]): { chars: number; lines: number } => {
+    let totalChars = 0;
+    let totalLines = 0;
+    
+    column.forEach(cont => {
+      if (cont.isFilled) {
+        totalChars += getTextLength(cont.content);
+        totalLines += getTextLines(cont.content);
+      }
+    });
+    
+    return { chars: totalChars, lines: totalLines };
   };
 
   const handleDropArticle = (articleId: string, columnIndex: number, containerIndex: number) => {
@@ -494,124 +519,306 @@ const LayoutDesignerWorkspace: React.FC = () => {
     
     if (!column[containerIndex]) return;
 
-    const container = column[containerIndex];
+    let container = column[containerIndex];
     
+    // Вычисляем общую занятость колонки
+    const columnUsed = getColumnUsedSpace(column);
+    const columnAvailableChars = CHARS_PER_COLUMN - columnUsed.chars;
+    const columnAvailableLines = LINES_PER_COLUMN - columnUsed.lines;
+    
+    // Проверяем, есть ли место в текущем контейнере для нового текста
     const currentLength = container.isFilled ? getTextLength(container.content) : 0;
     const currentLines = container.isFilled ? getTextLines(container.content) : 0;
     
-    if (currentLength >= CHARS_PER_COLUMN || currentLines >= LINES_PER_COLUMN) {
+    // Проверяем, поместится ли хотя бы часть статьи в текущий контейнер
+    const articleLength = getTextLength(article.content);
+    const articleLines = getTextLines(article.content);
+    const availableChars = CHARS_PER_COLUMN - currentLength;
+    const availableLines = LINES_PER_COLUMN - currentLines;
+    
+    console.log('Проверка вместимости:', {
+      columnUsedChars: columnUsed.chars,
+      columnAvailableChars,
+      articleLength,
+      currentLength,
+      availableChars,
+    });
+    
+    // Если текущий контейнер заполнен полностью ИЛИ нет места для нового текста, ищем пустой контейнер
+    if ((currentLength >= CHARS_PER_COLUMN || currentLines >= LINES_PER_COLUMN) ||
+        (articleLength > availableChars || articleLines > availableLines)) {
+      // Ищем пустой контейнер в этой колонке
+      const emptyContainer = column.find(cont => !cont.isFilled);
+      if (emptyContainer) {
+        container = emptyContainer;
+        containerIndex = column.indexOf(emptyContainer);
+      } else {
+        // Создаем новый пустой контейнер
+        const newEmpty: ColumnContainer = {
+          id: `col_${columnIndex}_container_${Date.now()}_${Math.random()}`,
+          columnIndex,
+          content: '',
+          height: 0,
+          isFilled: false,
+        };
+        column.push(newEmpty);
+        container = newEmpty;
+        containerIndex = column.length - 1;
+      }
+    }
+    
+    // Обновляем currentLength после возможного переключения контейнера
+    const updatedCurrentLength = container.isFilled ? getTextLength(container.content) : 0;
+    const updatedCurrentLines = container.isFilled ? getTextLines(container.content) : 0;
+
+    // Проверяем, поместится ли статья в оставшееся место в колонке
+    // Пересчитываем занятость колонки (на случай если контейнер изменился)
+    const updatedColumnUsed = getColumnUsedSpace(column);
+    const updatedColumnAvailableChars = CHARS_PER_COLUMN - updatedColumnUsed.chars;
+    const updatedColumnAvailableLines = LINES_PER_COLUMN - updatedColumnUsed.lines;
+    
+    // Разбиваем всю статью на части, которые помещаются в контейнер
+    let allParts = splitContentToFitContainer(article.content);
+    
+    // Если статья не разбилась на части, проверяем, поместится ли она в колонку
+    if (allParts.length === 1) {
+      const articleLength = getTextLength(article.content);
+      const articleLines = getTextLines(article.content);
+      const containerAvailableChars = CHARS_PER_COLUMN - updatedCurrentLength;
+      const containerAvailableLines = LINES_PER_COLUMN - updatedCurrentLines;
+      
+      // Если статья не помещается в доступное место в контейнере ИЛИ в колонке, разбиваем принудительно
+      if (articleLength > containerAvailableChars || articleLines > containerAvailableLines ||
+          articleLength > updatedColumnAvailableChars || articleLines > updatedColumnAvailableLines) {
+        console.log('Статья не разбилась, но не помещается. Принудительно разбиваем...', {
+          articleLength,
+          articleLines,
+          containerAvailableChars,
+          containerAvailableLines,
+          columnAvailableChars: updatedColumnAvailableChars,
+          columnAvailableLines: updatedColumnAvailableLines,
+        });
+        
+        // Разбиваем по символам с учетом доступного места
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(article.content, 'text/html');
+        const text = doc.body.textContent || '';
+        const tagName = doc.body.firstElementChild?.tagName.toLowerCase() || 'p';
+        
+        allParts = [];
+        let remainingText = text;
+        
+        // Первая часть - с учетом доступного места в КОЛОНКЕ (не только в контейнере!)
+        // Используем минимум из доступного места в контейнере и в колонке
+        const firstPartMaxChars = Math.min(
+          containerAvailableChars, 
+          updatedColumnAvailableChars,
+          CHARS_PER_COLUMN
+        );
+        
+        console.log('Разбиение статьи:', {
+          textLength: text.length,
+          firstPartMaxChars,
+          containerAvailableChars,
+          columnAvailableChars: updatedColumnAvailableChars,
+        });
+        
+        if (remainingText.length > firstPartMaxChars && firstPartMaxChars > 0) {
+          // Берем первую часть, которая помещается в колонку
+          const firstPartText = remainingText.substring(0, firstPartMaxChars);
+          allParts.push(`<${tagName}>${firstPartText}</${tagName}>`);
+          remainingText = remainingText.substring(firstPartMaxChars);
+          
+          // Остальные части - по CHARS_PER_COLUMN
+          while (remainingText.length > 0) {
+            const partText = remainingText.substring(0, CHARS_PER_COLUMN);
+            allParts.push(`<${tagName}>${partText}</${tagName}>`);
+            remainingText = remainingText.substring(CHARS_PER_COLUMN);
+          }
+        } else if (firstPartMaxChars <= 0) {
+          // В колонке нет места вообще - вся статья перетекает
+          allParts.push(article.content);
+        } else {
+          // Вся статья помещается в первую часть
+          allParts.push(article.content);
+        }
+        
+        console.log('Принудительно разбито на части:', allParts.length);
+      }
+    }
+    
+    console.log('handleDropArticle:', {
+      articleId: article.id,
+      columnIndex,
+      containerIndex,
+      allPartsCount: allParts.length,
+      currentLength: updatedCurrentLength,
+      currentLines: updatedCurrentLines,
+      availableChars: CHARS_PER_COLUMN - updatedCurrentLength,
+      availableLines: LINES_PER_COLUMN - updatedCurrentLines,
+      columnAvailableChars: updatedColumnAvailableChars,
+      columnAvailableLines: updatedColumnAvailableLines,
+    });
+    
+    if (allParts.length === 0) {
+      console.warn('Не удалось разбить контент');
       return;
     }
 
-    const contentParts = splitContentIntoContainers(article.content);
+    // Определяем, сколько частей поместится в колонку (не в контейнер!)
+    // Используем общую занятость колонки как базу
+    let partsInCurrentContainer = 0;
+    let columnTotalLength = updatedColumnUsed.chars; // Начинаем с уже занятого места в колонке
+    let columnTotalLines = updatedColumnUsed.lines;
     
-    const availableSpace = CHARS_PER_COLUMN - currentLength;
-    const availableLines = LINES_PER_COLUMN - currentLines;
-    let firstPartLength = getTextLength(contentParts[0]);
-    let firstPartLines = getTextLines(contentParts[0]);
-    
-    if (firstPartLength <= availableSpace && firstPartLines <= availableLines) {
-      if (container.isFilled) {
-        container.content += '<br/>' + contentParts[0];
+    // Проверяем каждую часть
+    for (let i = 0; i < allParts.length; i++) {
+      const partLength = getTextLength(allParts[i]);
+      const partLines = getTextLines(allParts[i]);
+      
+      // Проверяем, поместится ли часть в колонку (с учетом уже занятого места)
+      if (columnTotalLength + partLength <= CHARS_PER_COLUMN && columnTotalLines + partLines <= LINES_PER_COLUMN) {
+        columnTotalLength += partLength;
+        columnTotalLines += partLines;
+        partsInCurrentContainer++;
       } else {
-        container.content = contentParts[0];
+        // Часть не помещается в колонку
+        console.log(`Часть ${i} не помещается в колонку`, {
+          partLength,
+          partLines,
+          columnTotalLength,
+          columnTotalLines,
+          columnAvailableChars: CHARS_PER_COLUMN - columnTotalLength,
+          columnAvailableLines: LINES_PER_COLUMN - columnTotalLines,
+          limitChars: CHARS_PER_COLUMN,
+          limitLines: LINES_PER_COLUMN,
+        });
+        break;
       }
-      container.articleId = article.id;
+    }
+    
+    // Если ни одна часть не помещается, но есть части - перетекаем все
+    if (partsInCurrentContainer === 0 && allParts.length > 0) {
+      console.log('Ни одна часть не помещается в текущий контейнер, перетекаем все части');
+    }
+
+    console.log('Части в текущем контейнере:', partsInCurrentContainer, 'из', allParts.length);
+
+    // Заполняем текущий контейнер частями, которые помещаются
+    if (partsInCurrentContainer > 0) {
+      const partsToAdd = allParts.slice(0, partsInCurrentContainer);
+      if (container.isFilled) {
+        container.content += '<br/>' + partsToAdd.join('<br/>');
+      } else {
+        container.content = partsToAdd.join('<br/>');
+        container.articleId = article.id;
+      }
       container.isFilled = true;
       
+      // Проверяем, заполнил ли контейнер полностью
+      const newLength = getTextLength(container.content);
+      const newLines = getTextLines(container.content);
+      const fillsContainer = (newLength >= CHARS_PER_COLUMN * 0.95) || (newLines >= LINES_PER_COLUMN * 0.95);
+
+      console.log('Контейнер заполнен:', {
+        newLength,
+        newLines,
+        fillsContainer,
+        limitChars: CHARS_PER_COLUMN,
+        limitLines: LINES_PER_COLUMN,
+      });
+
+      // СЛУЧАЙ 1: Короткая статья - не заполняет контейнер полностью
+      if (!fillsContainer) {
+        // Создаем пустой контейнер сразу после заполненного для дальнейших вставок
+        const emptyAfter: ColumnContainer = {
+          id: `col_${columnIndex}_container_${Date.now()}_${Math.random()}`,
+          columnIndex,
+          content: '',
+          height: 0,
+          isFilled: false,
+        };
+        column.splice(containerIndex + 1, 0, emptyAfter);
+        console.log('Создан пустой контейнер после заполненного');
+      }
+    } else {
+      // Если ни одна часть не поместилась, перетекаем все части в следующую колонку
+      console.warn('Ни одна часть не поместилась в текущий контейнер, перетекаем все части');
+    }
+
+    // СЛУЧАЙ 2: Длинная статья - остальные части перетекают в следующие колонки
+    // Если ни одна часть не поместилась в текущий контейнер, перетекаем все части
+    const remainingParts = partsInCurrentContainer > 0 
+      ? allParts.slice(partsInCurrentContainer)
+      : allParts;
+    
+    console.log('Оставшиеся части для перетекания:', remainingParts.length, 'из', allParts.length);
+    
+    if (remainingParts.length > 0) {
       let currentColIndex = columnIndex;
       
-      for (let i = 1; i < contentParts.length; i++) {
-        currentColIndex = (currentColIndex + 1) % selectedTemplate.columns;
+      for (let partIndex = 0; partIndex < remainingParts.length && currentColIndex < selectedTemplate.columns - 1; partIndex++) {
+        currentColIndex = currentColIndex + 1;
         
-        let foundContainer = false;
-        for (let j = 0; j < newColumns[currentColIndex].length; j++) {
-          const cont = newColumns[currentColIndex][j];
-          if (hasSpaceInContainer(cont)) {
-            const contLength = cont.isFilled ? getTextLength(cont.content) : 0;
-            const contLines = cont.isFilled ? getTextLines(cont.content) : 0;
-            const partLength = getTextLength(contentParts[i]);
-            const partLines = getTextLines(contentParts[i]);
-            const contAvailableSpace = CHARS_PER_COLUMN - contLength;
-            const contAvailableLines = LINES_PER_COLUMN - contLines;
-            
-            if (partLength <= contAvailableSpace && partLines <= contAvailableLines) {
-              if (cont.isFilled) {
-                cont.content += '<br/>' + contentParts[i];
-              } else {
-                cont.content = contentParts[i];
-                cont.articleId = article.id;
-                cont.isFilled = true;
-              }
-              foundContainer = true;
-              break;
-            }
-          }
+        console.log(`Перетекание части ${partIndex} в колонку ${currentColIndex}`);
+        
+        // Находим или создаем пустой контейнер в следующей колонке
+        const nextColumn = newColumns[currentColIndex];
+        if (!nextColumn) {
+          console.error(`Колонка ${currentColIndex} не существует`);
+          break;
         }
         
-        if (!foundContainer) {
-          const newContainer: ColumnContainer = {
-            id: `col_${currentColIndex}_container_${newColumns[currentColIndex].length}`,
+        let emptyCont = nextColumn.find(cont => !cont.isFilled);
+        let emptyContIndex = emptyCont ? nextColumn.indexOf(emptyCont) : -1;
+        
+        if (emptyContIndex === -1) {
+          // Создаем новый пустой контейнер
+          const newEmpty: ColumnContainer = {
+            id: `col_${currentColIndex}_container_${Date.now()}_${Math.random()}`,
             columnIndex: currentColIndex,
-            content: contentParts[i],
-            articleId: article.id,
+            content: '',
             height: 0,
-            isFilled: true,
+            isFilled: false,
           };
-          newColumns[currentColIndex].push(newContainer);
+          nextColumn.push(newEmpty);
+          emptyCont = newEmpty;
+          emptyContIndex = nextColumn.length - 1;
+          console.log(`Создан новый пустой контейнер в колонке ${currentColIndex}`);
+        }
+
+        if (!emptyCont) {
+          console.error(`Не удалось найти или создать контейнер в колонке ${currentColIndex}`);
+          break;
+        }
+
+        // Вставляем часть в контейнер
+        emptyCont.content = remainingParts[partIndex];
+        emptyCont.articleId = article.id;
+        emptyCont.isFilled = true;
+
+        console.log(`Вставлена часть ${partIndex} в колонку ${currentColIndex}`);
+
+        // Проверяем, заполнил ли контейнер полностью
+        const newLength = getTextLength(emptyCont.content);
+        const newLines = getTextLines(emptyCont.content);
+        const fills = (newLength >= CHARS_PER_COLUMN * 0.95) || (newLines >= LINES_PER_COLUMN * 0.95);
+
+        // Если контейнер не заполнен полностью, создаем пустой после него
+        if (!fills) {
+          const emptyAfter: ColumnContainer = {
+            id: `col_${currentColIndex}_container_${Date.now()}_${Math.random()}`,
+            columnIndex: currentColIndex,
+            content: '',
+            height: 0,
+            isFilled: false,
+          };
+          nextColumn.splice(emptyContIndex + 1, 0, emptyAfter);
+          console.log(`Создан пустой контейнер после заполненного в колонке ${currentColIndex}`);
         }
       }
     } else {
-      if (!container.isFilled) {
-        container.content = contentParts[0];
-        container.articleId = article.id;
-        container.isFilled = true;
-      }
-      
-      let currentColIndex = columnIndex;
-      
-      for (let i = container.isFilled ? 1 : 0; i < contentParts.length; i++) {
-        if (i === 0 && container.isFilled) continue;
-        
-        currentColIndex = (currentColIndex + 1) % selectedTemplate.columns;
-        
-        let foundContainer = false;
-        for (let j = 0; j < newColumns[currentColIndex].length; j++) {
-          const cont = newColumns[currentColIndex][j];
-          if (hasSpaceInContainer(cont)) {
-            const contLength = cont.isFilled ? getTextLength(cont.content) : 0;
-            const contLines = cont.isFilled ? getTextLines(cont.content) : 0;
-            const partLength = getTextLength(contentParts[i]);
-            const partLines = getTextLines(contentParts[i]);
-            const contAvailableSpace = CHARS_PER_COLUMN - contLength;
-            const contAvailableLines = LINES_PER_COLUMN - contLines;
-            
-            if (partLength <= contAvailableSpace && partLines <= contAvailableLines) {
-              if (cont.isFilled) {
-                cont.content += '<br/>' + contentParts[i];
-              } else {
-                cont.content = contentParts[i];
-                cont.articleId = article.id;
-                cont.isFilled = true;
-              }
-              foundContainer = true;
-              break;
-            }
-          }
-        }
-        
-        if (!foundContainer) {
-          const newContainer: ColumnContainer = {
-            id: `col_${currentColIndex}_container_${newColumns[currentColIndex].length}`,
-            columnIndex: currentColIndex,
-            content: contentParts[i],
-            articleId: article.id,
-            height: 0,
-            isFilled: true,
-          };
-          newColumns[currentColIndex].push(newContainer);
-        }
-      }
+      console.log('Нет оставшихся частей для перетекания');
     }
 
     setColumns(newColumns);

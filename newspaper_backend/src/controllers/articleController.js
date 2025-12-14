@@ -219,10 +219,10 @@ const submitForReview = async (req, res) => {
       });
     }
 
-    if (article.status !== 'draft') {
+    if (article.status !== 'draft' && article.status !== 'needs_revision') {
       return res.status(400).json({
         success: false,
-        error: 'Only draft articles can be submitted for review',
+        error: 'Only draft or needs_revision articles can be submitted for review',
       });
     }
 

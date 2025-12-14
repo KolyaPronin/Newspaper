@@ -111,187 +111,226 @@ const PageLayout: React.FC<PageLayoutProps> = ({
           return (
             <div
               key={colIndex}
-              className="page-column"
               style={{
                 width: columnWidth,
-                padding: '12px',
-                position: 'relative',
-                background: '#fafafa',
-                borderRadius: '8px',
-                border: '1px solid #e0e0e0',
                 display: 'flex',
                 flexDirection: 'column',
                 height: '100%',
-                overflow: 'hidden',
               }}
             >
               <div
+                className="page-column"
                 style={{
-                  height: hasIllustration ? `calc(100% - ${illustrationHeight}px - 12px)` : '100%',
-                  maxHeight: hasIllustration ? `calc(100% - ${illustrationHeight}px - 12px)` : '100%',
+                  width: '100%',
+                  padding: '12px',
+                  position: 'relative',
+                  background: '#fafafa',
+                  borderRadius: '8px',
+                  border: '1px solid #e0e0e0',
                   display: 'flex',
                   flexDirection: 'column',
+                  height: hasIllustration ? `calc(100% - ${illustrationHeight}px - 12px)` : '100%',
+                  maxHeight: hasIllustration ? `calc(100% - ${illustrationHeight}px - 12px)` : '100%',
                   overflow: 'hidden',
                   marginBottom: hasIllustration ? '12px' : '0',
                 }}
               >
-                {columnContainers.length === 0 ? (
-                  <div
-                    className="column-container empty"
-                    onDrop={(e) => handleDrop(e, colIndex, 0)}
-                    onDragOver={handleDragOver}
-                    style={{
-                      border: '2px dashed var(--accent)',
-                      borderRadius: '4px',
-                      padding: '20px',
-                      background: 'rgba(6, 191, 204, 0.05)',
-                      cursor: 'pointer',
-                      flexShrink: 0,
-                      minHeight: '100px',
-                      height: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <div style={{ color: 'var(--subtext)', fontSize: '12px', textAlign: 'center' }}>
-                      Перетащите статью сюда
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    key={columnContainers[0].id}
-                    className={`column-container ${columnContainers[0].isFilled ? 'filled' : 'empty'}`}
-                    onDrop={(e) => handleDrop(e, colIndex, 0)}
-                    onDragOver={handleDragOver}
-                    style={{
-                      border: columnContainers[0].isFilled ? 'none' : '2px dashed var(--accent)',
-                      borderRadius: hasIllustration ? '4px 4px 0 0' : '4px',
-                      padding: columnContainers[0].isFilled ? '8px' : '20px',
-                      background: columnContainers[0].isFilled ? 'transparent' : 'rgba(6, 191, 204, 0.05)',
-                      cursor: columnContainers[0].isFilled ? 'default' : 'pointer',
-                      flexShrink: 0,
-                      minHeight: '100px',
-                      height: '100%',
-                      maxHeight: '100%',
-                      overflowY: 'hidden',
-                      display: 'flex',
-                      flexDirection: 'column',
-                    }}
-                  >
-                    {columnContainers[0].isFilled ? (
-                      <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column' }}>
-                        <div
-                          className="article-content"
-                          dangerouslySetInnerHTML={{ __html: columnContainers[0].content }}
-                          style={{ fontSize: '12px', lineHeight: '1.5', flex: 1 }}
-                        />
-                        {onDeleteContainer && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDeleteContainer(colIndex, 0);
-                            }}
-                            style={{
-                              position: 'absolute',
-                              top: '4px',
-                              right: '4px',
-                              background: 'rgba(255, 107, 107, 0.9)',
-                              border: 'none',
-                              borderRadius: '4px',
-                              color: 'white',
-                              cursor: 'pointer',
-                              padding: '4px 8px',
-                              fontSize: '10px',
-                              fontWeight: 500,
-                              zIndex: 10,
-                            }}
-                            title="Удалить текст"
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <div style={{ color: 'var(--subtext)', fontSize: '12px', textAlign: 'center', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        Перетащите статью сюда
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-              
-              {template.illustrationPositions
-                .filter(pos => pos.allowedColumns.includes(colIndex))
-                .map((pos, idx) => {
-                  const illustration = getIllustrationForSlot(colIndex, idx);
-                  return (
+                <div
+                  style={{
+                    height: '100%',
+                    maxHeight: '100%',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden',
+                    flex: 1,
+                    minHeight: 0,
+                  }}
+                >
+                  {columnContainers.length === 0 ? (
                     <div
-                      key={`illus_${colIndex}_${idx}`}
-                      className="illustration-slot"
-                      onDrop={(e) => handleIllustrationDrop(e, colIndex, idx)}
+                      className="column-container empty"
+                      onDrop={(e) => handleDrop(e, colIndex, 0)}
                       onDragOver={handleDragOver}
                       style={{
-                        width: '100%',
-                        height: '120px',
-                        border: illustration ? '2px solid #4ecdc4' : '2px dashed #4ecdc4',
-                        background: illustration ? 'rgba(78, 205, 196, 0.2)' : 'rgba(78, 205, 196, 0.1)',
-                        borderRadius: '6px',
+                        border: '2px dashed var(--accent)',
+                        borderRadius: '4px',
+                        padding: '20px',
+                        background: 'rgba(6, 191, 204, 0.05)',
+                        cursor: 'pointer',
+                        flexShrink: 0,
+                        minHeight: '100px',
+                        height: '100%',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        fontSize: '11px',
-                        color: '#4ecdc4',
-                        flexShrink: 0,
-                        marginTop: idx > 0 ? '12px' : '0',
-                        position: 'relative',
-                        overflow: 'hidden',
-                        cursor: illustration ? 'default' : 'pointer',
                       }}
                     >
-                      {illustration ? (
-                        <>
-                          <img
-                            src={illustration.url}
-                            alt={illustration.caption || ''}
-                            style={{
-                              width: '100%',
-                              height: '100%',
-                              objectFit: 'cover',
-                            }}
-                          />
-                          {onDeleteIllustration && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onDeleteIllustration(colIndex, idx);
-                              }}
-                              style={{
-                                position: 'absolute',
-                                top: '4px',
-                                right: '4px',
-                                background: 'rgba(255, 107, 107, 0.9)',
-                                border: 'none',
-                                borderRadius: '4px',
-                                color: 'white',
-                                cursor: 'pointer',
-                                padding: '4px 8px',
-                                fontSize: '10px',
-                                fontWeight: 500,
-                                zIndex: 10,
-                              }}
-                              title="Удалить иллюстрацию"
-                            >
-                              ✕
-                            </button>
-                          )}
-                        </>
-                      ) : (
-                        <span>Иллюстрация</span>
-                      )}
+                      <div style={{ color: 'var(--subtext)', fontSize: '12px', textAlign: 'center' }}>
+                        Перетащите статью сюда
+                      </div>
                     </div>
-                  );
-                })}
+                  ) : (
+                    columnContainers.map((container, containerIdx) => {
+                      const isFirst = containerIdx === 0;
+                      const isLast = containerIdx === columnContainers.length - 1;
+                      return (
+                        <div
+                          key={container.id}
+                          className={`column-container ${container.isFilled ? 'filled' : 'empty'}`}
+                          onDrop={(e) => handleDrop(e, colIndex, containerIdx)}
+                          onDragOver={handleDragOver}
+                          style={{
+                            border: container.isFilled ? 'none' : '2px dashed var(--accent)',
+                            borderRadius: isFirst ? '4px' : '0',
+                            padding: container.isFilled ? '8px' : '20px',
+                            background: container.isFilled ? 'transparent' : 'rgba(6, 191, 204, 0.05)',
+                            cursor: container.isFilled ? 'default' : 'pointer',
+                            flexShrink: container.isFilled ? 0 : 1,
+                            minHeight: container.isFilled ? 'auto' : '100px',
+                            maxHeight: '100%',
+                            overflow: 'hidden',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            marginBottom: isLast ? '0' : '8px',
+                          }}
+                        >
+                          {container.isFilled ? (
+                            <div style={{ 
+                              position: 'relative', 
+                              display: 'flex', 
+                              flexDirection: 'column', 
+                              width: '100%', 
+                              flex: '1 1 auto',
+                              minHeight: 0,
+                              overflow: 'hidden' 
+                            }}>
+                              <div
+                                className="article-content"
+                                dangerouslySetInnerHTML={{ __html: container.content }}
+                                style={{ 
+                                  fontSize: '12px', 
+                                  lineHeight: '1.5', 
+                                  overflow: 'hidden',
+                                  wordBreak: 'break-word',
+                                  hyphens: 'auto'
+                                }}
+                              />
+                              {onDeleteContainer && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDeleteContainer(colIndex, containerIdx);
+                                  }}
+                                  style={{
+                                    position: 'absolute',
+                                    top: '4px',
+                                    right: '4px',
+                                    background: 'rgba(255, 107, 107, 0.9)',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    color: 'white',
+                                    cursor: 'pointer',
+                                    padding: '4px 8px',
+                                    fontSize: '10px',
+                                    fontWeight: 500,
+                                    zIndex: 10,
+                                  }}
+                                  title="Удалить текст"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <div style={{ color: 'var(--subtext)', fontSize: '12px', textAlign: 'center', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              Перетащите статью сюда
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+              
+              {hasIllustration && (
+                <div style={{ 
+                  width: '100%',
+                  flexShrink: 0,
+                }}>
+                  {template.illustrationPositions
+                    .filter(pos => pos.allowedColumns.includes(colIndex))
+                    .map((pos, idx) => {
+                      const illustration = getIllustrationForSlot(colIndex, idx);
+                      return (
+                        <div
+                          key={`illus_${colIndex}_${idx}`}
+                          className="illustration-slot"
+                          onDrop={(e) => handleIllustrationDrop(e, colIndex, idx)}
+                          onDragOver={handleDragOver}
+                          style={{
+                            width: '100%',
+                            height: '120px',
+                            border: illustration ? '2px solid #4ecdc4' : '2px dashed #4ecdc4',
+                            background: illustration ? 'rgba(78, 205, 196, 0.2)' : 'rgba(78, 205, 196, 0.1)',
+                            borderRadius: '6px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '11px',
+                            color: '#4ecdc4',
+                            flexShrink: 0,
+                            marginTop: idx > 0 ? '12px' : '0',
+                            position: 'relative',
+                            overflow: 'hidden',
+                            cursor: illustration ? 'default' : 'pointer',
+                          }}
+                        >
+                          {illustration ? (
+                            <>
+                              <img
+                                src={illustration.url}
+                                alt={illustration.caption || ''}
+                                style={{
+                                  width: '100%',
+                                  height: '100%',
+                                  objectFit: 'cover',
+                                }}
+                              />
+                              {onDeleteIllustration && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDeleteIllustration(colIndex, idx);
+                                  }}
+                                  style={{
+                                    position: 'absolute',
+                                    top: '4px',
+                                    right: '4px',
+                                    background: 'rgba(255, 107, 107, 0.9)',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    color: 'white',
+                                    cursor: 'pointer',
+                                    padding: '4px 8px',
+                                    fontSize: '10px',
+                                    fontWeight: 500,
+                                    zIndex: 10,
+                                  }}
+                                  title="Удалить иллюстрацию"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </>
+                          ) : (
+                            <span>Иллюстрация</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
             </div>
           );
         })}

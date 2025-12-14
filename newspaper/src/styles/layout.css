@@ -1,0 +1,134 @@
+.layout-designer-workspace {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.layout-workspace-content {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.layout-articles-sidebar {
+  position: sticky;
+  top: 24px;
+  background: rgba(21, 24, 33, 0.3);
+  border: 1px solid rgba(38, 42, 54, 0.3);
+  border-radius: 12px;
+  padding: 16px;
+  backdrop-filter: blur(6px);
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+}
+
+.layout-articles-sidebar h3 {
+  margin: 0 0 12px 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.layout-articles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.layout-article-item {
+  background: rgba(14, 16, 22, 0.5);
+  border: 1px solid rgba(38, 42, 54, 0.4);
+  border-radius: 8px;
+  padding: 10px;
+  cursor: grab;
+  transition: border-color .2s ease, transform .1s ease;
+}
+
+.layout-article-item:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.layout-article-item:active {
+  cursor: grabbing;
+}
+
+.layout-article-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.layout-article-meta {
+  font-size: 11px;
+  color: var(--subtext);
+}
+
+.layout-page-area {
+  background: rgba(21, 24, 33, 0.2);
+  border: 1px solid rgba(38, 42, 54, 0.3);
+  border-radius: 12px;
+  padding: 20px;
+  backdrop-filter: blur(6px);
+  overflow-x: auto;
+}
+
+.page-layout {
+  background: white;
+  color: #000;
+  page-break-after: always;
+}
+
+.page-column::-webkit-scrollbar {
+  width: 6px;
+}
+
+.page-column::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.page-column::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 3px;
+}
+
+.page-column::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
+.column-container.empty:hover {
+  background: rgba(6, 191, 204, 0.1);
+  border-color: var(--accent);
+}
+
+.column-container.filled {
+  border: 1px solid rgba(38, 42, 54, 0.2);
+}
+
+.article-content {
+  /* Мягкие переносы, но без агрессивного разрыва слов посередине */
+  overflow-wrap: break-word;
+}
+
+.article-content p {
+  margin: 0 0 8px 0;
+  text-align: justify;
+  text-justify: inter-word;
+  hyphens: auto;
+}
+
+.article-content h1,
+.article-content h2,
+.article-content h3 {
+  margin: 12px 0 8px 0;
+  font-weight: 600;
+}
+
+.article-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+

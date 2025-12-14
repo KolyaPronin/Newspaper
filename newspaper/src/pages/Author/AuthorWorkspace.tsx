@@ -31,14 +31,7 @@ const AuthorWorkspace: React.FC = () => {
   );
 
   const needsRevision = useMemo(() => {
-    const filtered = articles.filter(a => a.authorId === user?.id && a.status === 'needs_revision');
-    console.log('Author needsRevision filter:', {
-      userId: user?.id,
-      totalArticles: articles.length,
-      filteredCount: filtered.length,
-      allArticles: articles.map(a => ({ id: a.id, authorId: a.authorId, status: a.status }))
-    });
-    return filtered;
+    return articles.filter(a => a.authorId === user?.id && a.status === 'needs_revision');
   }, [articles, user?.id]);
 
   const inReview = useMemo(

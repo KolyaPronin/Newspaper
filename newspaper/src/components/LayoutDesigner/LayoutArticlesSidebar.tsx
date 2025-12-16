@@ -38,59 +38,26 @@ const LayoutArticlesSidebar: React.FC<LayoutArticlesSidebarProps> = ({
         </div>
       )}
       
-      <div style={{ marginTop: 24, paddingTop: 24, borderTop: '1px solid rgba(38, 42, 54, 0.3)' }}>
-        <h3 style={{ marginBottom: 12, fontSize: 14, fontWeight: 600 }}>Иллюстрации</h3>
+      <div className="illustrations-section">
+        <h3 className="illustrations-section-title">Иллюстрации</h3>
         {allIllustrations.length === 0 ? (
-          <p className="article-empty" style={{ fontSize: 12 }}>Нет доступных иллюстраций</p>
+          <p className="article-empty">Нет доступных иллюстраций</p>
         ) : (
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(2, 1fr)', 
-            gap: 8,
-            maxHeight: '300px',
-            overflowY: 'auto',
-          }}>
+          <div className="illustrations-grid">
             {allIllustrations.map(ill => (
               <div
                 key={ill.id}
+                className="illustration-item"
                 draggable
                 onDragStart={(e) => onIllustrationDragStart(e, ill.id)}
-                style={{
-                  cursor: 'grab',
-                  border: '1px solid rgba(38, 42, 54, 0.4)',
-                  borderRadius: 6,
-                  overflow: 'hidden',
-                  background: 'rgba(14, 16, 22, 0.5)',
-                  transition: 'all 0.2s ease',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = 'var(--accent)';
-                  e.currentTarget.style.transform = 'scale(1.02)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = 'rgba(38, 42, 54, 0.4)';
-                  e.currentTarget.style.transform = 'scale(1)';
-                }}
               >
                 <img
                   src={ill.url}
                   alt={ill.caption || ''}
-                  style={{
-                    width: '100%',
-                    height: 60,
-                    objectFit: 'cover',
-                    display: 'block',
-                  }}
+                  className="illustration-image"
                 />
                 {ill.caption && (
-                  <div style={{
-                    padding: '4px 6px',
-                    fontSize: 10,
-                    color: 'var(--subtext)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}>
+                  <div className="illustration-caption">
                     {ill.caption}
                   </div>
                 )}

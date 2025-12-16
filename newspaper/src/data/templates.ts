@@ -58,3 +58,40 @@ export const defaultPageTemplate: PageTemplate = {
   },
 };
 
+export const coverPageTemplate: PageTemplate = {
+  id: 'cover_page',
+  name: 'Обложка (первая страница)',
+  columns: 1,
+  adSlots: [],
+  illustrationPositions: [
+    {
+      id: 'cover_main',
+      allowedColumns: [0],
+      maxWidth: 100,
+      maxHeight: 400,
+      textWrapping: 'below',
+    },
+  ],
+  margins: {
+    top: 15,
+    bottom: 15,
+    left: 10,
+    right: 10,
+  },
+  headers: {
+    content: '',
+    height: 0,
+  },
+  footers: {
+    content: '',
+    height: 0,
+  },
+  textFlowRules: {
+    wrapAroundIllustrations: false,
+    wrapAroundAds: false,
+    multiColumnContinuation: false,
+  },
+};
+
+export const TOTAL_PAGES = 10;
+

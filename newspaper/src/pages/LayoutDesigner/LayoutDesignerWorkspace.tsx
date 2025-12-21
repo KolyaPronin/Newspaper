@@ -8,7 +8,7 @@ import LayoutHeader from '../../components/LayoutDesigner/LayoutHeader';
 import LayoutArticlesSidebar from '../../components/LayoutDesigner/LayoutArticlesSidebar';
 import PageNavigation from '../../components/LayoutDesigner/PageNavigation';
 import { layoutAPI, templateAPI, illustrationAPI, Illustration } from '../../utils/api';
-import { CHARS_PER_COLUMN, LINES_PER_COLUMN, getTextLength, getTextLines, splitContentToFitContainer } from '../../hooks/useContentSplitting';
+import { CHARS_PER_COLUMN, LINES_PER_COLUMN, getTextLength, getTextLines, splitContentToFitWithRemaining } from '../../hooks/useContentSplitting';
 
 interface PageData {
   columns: ColumnContainer[][];
@@ -330,15 +330,100 @@ const LayoutDesignerWorkspace: React.FC = () => {
   const getColumnUsedSpace = useCallback((column: ColumnContainer[]): { chars: number; lines: number } => {
     let totalChars = 0;
     let totalLines = 0;
+    let filledCount = 0;
     
     column.forEach(cont => {
       if (cont.isFilled) {
+        filledCount += 1;
         totalChars += getTextLength(cont.content);
         totalLines += getTextLines(cont.content);
       }
     });
+
+    // UI-оверход, который реальный DOM занимает по высоте, но не учитывается в getTextLines:
+    // - паддинги .page-column (12px сверху/снизу)
+    // - drop-зоны между контейнерами (10px)
+    // - вертикальные отступы между контейнерами (8px)
+    // Если это не учитывать, низ текста может визуально клипаться (кажется, что он "уходит под иллюстрацию").
+    const approxLineHeightPx = 18;
+    const columnPaddingPx = 24;
+    const dropZoneHeightPx = 10;
+    const containerGapPx = 8;
+    const filledContainerPaddingPx = 16;
+    const dropZonesCount = column.length > 0 ? (column.length + 1) : 0;
+    const gapsCount = Math.max(0, column.length - 1);
+    const overheadPx =
+      columnPaddingPx +
+      (dropZonesCount * dropZoneHeightPx) +
+      (gapsCount * containerGapPx) +
+      (filledCount * filledContainerPaddingPx);
+    const overheadLines = overheadPx > 0 ? Math.ceil(overheadPx / approxLineHeightPx) : 0;
+    totalLines += overheadLines;
+
+    // Минимальный запас, чтобы не было клипа на 1 строку из-за неточностей метрик/шрифтов
+    totalLines += 1;
     
     return { chars: totalChars, lines: totalLines };
+  }, []);
+
+  const getColumnCapacity = useCallback((template: PageTemplate, columnIndex: number): { maxChars: number; maxLines: number } => {
+    const slots = template.illustrationPositions.filter(pos => pos.allowedColumns.includes(columnIndex)).length;
+    const illustrationSlotHeightPx = 120;
+    const illustrationGapPx = 12;
+    const approxLineHeightPx = 18;
+    const reservedPx = slots > 0
+      ? (slots * illustrationSlotHeightPx) + ((slots - 1) * illustrationGapPx) + illustrationGapPx
+      : 0;
+    const reservedLines = reservedPx > 0 ? Math.ceil(reservedPx / approxLineHeightPx) : 0;
+    const SAFETY_LINES = slots > 0 ? 3 : 0;
+    const maxLines = Math.max(1, LINES_PER_COLUMN - reservedLines - SAFETY_LINES);
+    const maxChars = Math.max(1, Math.floor(CHARS_PER_COLUMN * (maxLines / LINES_PER_COLUMN)));
+    return { maxChars, maxLines };
+  }, []);
+
+  const ensureEmptyContainerAtEnd = useCallback((
+    column: ColumnContainer[],
+    columnIndex: number,
+    remainingLines: number
+  ) => {
+    // Хотим показывать хвостовой пустой контейнер только когда места РЕАЛЬНО много.
+    // Иначе он выглядит как «лишний на 1–2 строки».
+    const MIN_EMPTY_DROP_LINES = 4;
+    const approxLineHeightPx = 18;
+
+    // Добавление хвостового пустого контейнера само по себе съедает место:
+    // - появится ещё 1 drop-zone снизу
+    // - появится gap между последним заполненным контейнером и пустым
+    // - у пустого контейнера есть внутренние padding (минимальная «интринсик» высота)
+    // Если это не учесть — пустой контейнер будет создаваться даже при маленьком остатке,
+    // визуально «лишний» и иногда выглядит как залезание под иллюстрацию.
+    const emptyContainerPaddingPx = 40;
+    const extraDropZonePx = 10;
+    const extraGapPx = 8;
+    const extraOverheadLines = Math.ceil(
+      (emptyContainerPaddingPx + extraDropZonePx + extraGapPx) / approxLineHeightPx
+    );
+
+    const predictedRemainingAfterEmpty = remainingLines - extraOverheadLines;
+
+    // Если места почти не осталось — не показываем/не создаём хвостовой пустой контейнер
+    if (predictedRemainingAfterEmpty < MIN_EMPTY_DROP_LINES) {
+      while (column.length > 0 && !column[column.length - 1].isFilled) {
+        column.pop();
+      }
+      return;
+    }
+
+    const hasEmpty = column.some(cont => !cont.isFilled);
+    if (hasEmpty) return;
+
+    column.push({
+      id: `col_${columnIndex}_container_${Date.now()}_${Math.random()}`,
+      columnIndex,
+      content: '',
+      height: 0,
+      isFilled: false,
+    });
   }, []);
 
   const handleDeleteContainer = useCallback((columnIndex: number, containerIndex: number) => {
@@ -346,15 +431,16 @@ const LayoutDesignerWorkspace: React.FC = () => {
       columns: currentPageData.columns.map((col, colIdx) => {
         if (colIdx !== columnIndex) return col;
         const newCol = [...col];
-        newCol.splice(containerIndex, 1);
-        if (newCol.length === 0) {
-          newCol.push({
-            id: `col_${columnIndex}_container_0`,
-            columnIndex,
+        const target = newCol[containerIndex];
+        if (target) {
+          // «Удалить текст» = очистить контейнер, а не удалять его из списка.
+          // Иначе у колонки визуально «пропадает место/дроп-зона».
+          newCol[containerIndex] = {
+            ...target,
             content: '',
-            height: 0,
             isFilled: false,
-          });
+            articleId: undefined,
+          };
         }
         return newCol;
       }),
@@ -365,192 +451,196 @@ const LayoutDesignerWorkspace: React.FC = () => {
     const article = articles.find(a => a.id === articleId);
     if (!article) return;
 
-    const pageTemplate = getTemplateForPage(currentPage);
-    const newColumns = currentPageData.columns.map(col => col.map(cont => ({ ...cont })));
-    const column = newColumns[columnIndex];
-    
-    if (!column[containerIndex]) return;
+    type FlowItem = { articleId?: string; html: string; source: 'existing' | 'new' };
 
-    let container = column[containerIndex];
-    
-    const columnUsed = getColumnUsedSpace(column);
-    const columnAvailableChars = CHARS_PER_COLUMN - columnUsed.chars;
-    const columnAvailableLines = LINES_PER_COLUMN - columnUsed.lines;
-    
-    const currentLength = container.isFilled ? getTextLength(container.content) : 0;
-    const currentLines = container.isFilled ? getTextLines(container.content) : 0;
-    
-    const articleLength = getTextLength(article.content);
-    const articleLines = getTextLines(article.content);
-    const availableChars = CHARS_PER_COLUMN - currentLength;
-    const availableLines = LINES_PER_COLUMN - currentLines;
-    
-    if ((currentLength >= CHARS_PER_COLUMN || currentLines >= LINES_PER_COLUMN) ||
-        (articleLength > availableChars || articleLines > availableLines)) {
-      const emptyContainer = column.find(cont => !cont.isFilled);
-      if (emptyContainer) {
-        container = emptyContainer;
-        containerIndex = column.indexOf(emptyContainer);
-      } else {
-        const newEmpty: ColumnContainer = {
-          id: `col_${columnIndex}_container_${Date.now()}_${Math.random()}`,
-          columnIndex,
-          content: '',
-          height: 0,
-          isFilled: false,
-        };
-        column.push(newEmpty);
-        container = newEmpty;
-        containerIndex = column.length - 1;
+    const getPlainText = (html: string): string => {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      return (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
+    };
+
+    // Для старых/загруженных макетов articleId может быть пустым.
+    // Тогда «склейка» и нормальный рефлоу невозможны. Пытаемся восстановить articleId по содержимому.
+    const inferArticleIdFromHtml = (() => {
+      const articleTextIndex = new Map<string, string>();
+      for (const a of articles) {
+        if (!articleTextIndex.has(a.id)) {
+          articleTextIndex.set(a.id, getPlainText(a.content));
+        }
       }
-    }
-    
-    const updatedCurrentLength = container.isFilled ? getTextLength(container.content) : 0;
-    const updatedCurrentLines = container.isFilled ? getTextLines(container.content) : 0;
-    const updatedColumnUsed = getColumnUsedSpace(column);
-    const updatedColumnAvailableChars = CHARS_PER_COLUMN - updatedColumnUsed.chars;
-    const updatedColumnAvailableLines = LINES_PER_COLUMN - updatedColumnUsed.lines;
-    
-    let allParts = splitContentToFitContainer(article.content);
-    
-    if (allParts.length === 1) {
-      const containerAvailableChars = CHARS_PER_COLUMN - updatedCurrentLength;
-      const containerAvailableLines = LINES_PER_COLUMN - updatedCurrentLines;
-      
-      if (articleLength > containerAvailableChars || articleLines > containerAvailableLines ||
-          articleLength > updatedColumnAvailableChars || articleLines > updatedColumnAvailableLines) {
-        
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(article.content, 'text/html');
-        const text = doc.body.textContent || '';
-        const tagName = doc.body.firstElementChild?.tagName.toLowerCase() || 'p';
-        
-        allParts = [];
-        let remainingText = text;
-        
-        const firstPartMaxChars = Math.min(
-          containerAvailableChars, 
-          updatedColumnAvailableChars,
-          CHARS_PER_COLUMN
-        );
-        
-        if (remainingText.length > firstPartMaxChars && firstPartMaxChars > 0) {
-          const firstPartText = remainingText.substring(0, firstPartMaxChars);
-          allParts.push(`<${tagName}>${firstPartText}</${tagName}>`);
-          remainingText = remainingText.substring(firstPartMaxChars);
-          
-          while (remainingText.length > 0) {
-            const partText = remainingText.substring(0, CHARS_PER_COLUMN);
-            allParts.push(`<${tagName}>${partText}</${tagName}>`);
-            remainingText = remainingText.substring(CHARS_PER_COLUMN);
+
+      return (html: string): string | undefined => {
+        const text = getPlainText(html);
+        if (!text) return undefined;
+        const probe = text.slice(0, Math.min(80, text.length));
+        if (probe.length < 30) return undefined;
+
+        const entries = Array.from(articleTextIndex.entries());
+        for (let i = 0; i < entries.length; i++) {
+          const id = entries[i][0];
+          const fullText = entries[i][1];
+          if (fullText.includes(probe)) return id;
+        }
+        return undefined;
+      };
+    })();
+
+    const initPageData = (pageNum: number, template: PageTemplate): PageData => {
+      return {
+        columns: buildEmptyColumns(template),
+        headerContent: pageNum === 1 ? '' : (template.headers?.content || 'Заголовок газеты'),
+        layoutTitle: pageNum === 1 ? 'Обложка' : `Страница ${pageNum}`,
+        layoutId: null,
+        layoutIllustrations: [],
+      };
+    };
+
+    const collectTailFromColumns = (
+      columns: ColumnContainer[][],
+      templateColumnsCount: number,
+      startColIndex: number,
+      startContainerIndex: number,
+      into: FlowItem[]
+    ) => {
+      const pushMergedExisting = (item: FlowItem) => {
+        const last = into.length > 0 ? into[into.length - 1] : undefined;
+        if (
+          last &&
+          last.source === 'existing' &&
+          item.source === 'existing' &&
+          last.articleId &&
+          item.articleId &&
+          last.articleId === item.articleId
+        ) {
+          last.html += item.html;
+          return;
+        }
+        into.push(item);
+      };
+
+      for (let colIdx = startColIndex; colIdx < templateColumnsCount; colIdx++) {
+        const column = columns[colIdx];
+        if (!column) continue;
+        const startIdx = colIdx === startColIndex ? Math.min(startContainerIndex, column.length) : 0;
+        const removed = column.splice(startIdx);
+        removed.forEach(cont => {
+          if (cont.isFilled && cont.content) {
+            const resolvedArticleId = cont.articleId || inferArticleIdFromHtml(cont.content);
+            pushMergedExisting({ articleId: resolvedArticleId, html: cont.content, source: 'existing' });
           }
-        } else if (firstPartMaxChars <= 0) {
-          allParts.push(article.content);
-        } else {
-          allParts.push(article.content);
+        });
+      }
+    };
+
+    const packFlowIntoPageColumns = (
+      flow: FlowItem[],
+      columns: ColumnContainer[][],
+      template: PageTemplate,
+      startColIndex: number
+    ) => {
+      for (let colIdx = startColIndex; colIdx < template.columns && flow.length > 0; colIdx++) {
+        const column = columns[colIdx] || [];
+        columns[colIdx] = column;
+
+        // Убираем любые пустые контейнеры перед упаковкой, чтобы они не влияли на оверхед/ёмкость.
+        // Новые пустые зоны создаются только через ensureEmptyContainerAtEnd.
+        for (let i = column.length - 1; i >= 0; i--) {
+          if (!column[i].isFilled) {
+            column.splice(i, 1);
+          }
         }
-      }
-    }
-    
-    if (allParts.length === 0) return;
+        const { maxChars, maxLines } = getColumnCapacity(template, colIdx);
+        let used = getColumnUsedSpace(column);
 
-    let partsInCurrentContainer = 0;
-    let columnTotalLength = updatedColumnUsed.chars;
-    let columnTotalLines = updatedColumnUsed.lines;
-    
-    for (let i = 0; i < allParts.length; i++) {
-      const partLength = getTextLength(allParts[i]);
-      const partLines = getTextLines(allParts[i]);
-      
-      if (columnTotalLength + partLength <= CHARS_PER_COLUMN && columnTotalLines + partLines <= LINES_PER_COLUMN) {
-        columnTotalLength += partLength;
-        columnTotalLines += partLines;
-        partsInCurrentContainer++;
-      } else {
-        break;
-      }
-    }
-    
-    if (partsInCurrentContainer > 0) {
-      const partsToAdd = allParts.slice(0, partsInCurrentContainer);
-      if (container.isFilled) {
-        container.content += '<br/>' + partsToAdd.join('<br/>');
-      } else {
-        container.content = partsToAdd.join('<br/>');
-        container.articleId = article.id;
-      }
-      container.isFilled = true;
-      
-      const newLength = getTextLength(container.content);
-      const newLines = getTextLines(container.content);
-      const fillsContainer = (newLength >= CHARS_PER_COLUMN * 0.95) || (newLines >= LINES_PER_COLUMN * 0.95);
+        while (flow.length > 0) {
+          const current = flow[0];
+          const { parts, remainingHtml } = splitContentToFitWithRemaining(
+            current.html,
+            used.chars,
+            used.lines,
+            maxChars,
+            maxLines
+          );
 
-      if (!fillsContainer) {
-        const emptyAfter: ColumnContainer = {
-          id: `col_${columnIndex}_container_${Date.now()}_${Math.random()}`,
-          columnIndex,
-          content: '',
-          height: 0,
-          isFilled: false,
-        };
-        column.splice(containerIndex + 1, 0, emptyAfter);
-      }
-    }
+          if (parts.length === 0) {
+            break;
+          }
 
-    const remainingParts = partsInCurrentContainer > 0 
-      ? allParts.slice(partsInCurrentContainer)
-      : allParts;
-    
-    if (remainingParts.length > 0) {
-      let currentColIndex = columnIndex;
-      
-      for (let partIndex = 0; partIndex < remainingParts.length && currentColIndex < pageTemplate.columns - 1; partIndex++) {
-        currentColIndex = currentColIndex + 1;
-        
-        const nextColumn = newColumns[currentColIndex];
-        if (!nextColumn) break;
-        
-        let emptyCont = nextColumn.find(cont => !cont.isFilled);
-        let emptyContIndex = emptyCont ? nextColumn.indexOf(emptyCont) : -1;
-        
-        if (emptyContIndex === -1) {
-          const newEmpty: ColumnContainer = {
-            id: `col_${currentColIndex}_container_${Date.now()}_${Math.random()}`,
-            columnIndex: currentColIndex,
-            content: '',
+          const filled: ColumnContainer = {
+            id: `col_${colIdx}_container_${Date.now()}_${Math.random()}`,
+            columnIndex: colIdx,
+            content: parts[0],
             height: 0,
-            isFilled: false,
+            isFilled: true,
+            articleId: current.articleId,
           };
-          nextColumn.push(newEmpty);
-          emptyCont = newEmpty;
-          emptyContIndex = nextColumn.length - 1;
+          column.push(filled);
+
+          used = getColumnUsedSpace(column);
+
+          if (remainingHtml) {
+            current.html = remainingHtml;
+            break;
+          }
+
+          flow.shift();
         }
 
-        if (!emptyCont) break;
-
-        emptyCont.content = remainingParts[partIndex];
-        emptyCont.articleId = article.id;
-        emptyCont.isFilled = true;
-
-        const newLength = getTextLength(emptyCont.content);
-        const newLines = getTextLines(emptyCont.content);
-        const fills = (newLength >= CHARS_PER_COLUMN * 0.95) || (newLines >= LINES_PER_COLUMN * 0.95);
-
-        if (!fills) {
-          const emptyAfter: ColumnContainer = {
-            id: `col_${currentColIndex}_container_${Date.now()}_${Math.random()}`,
-            columnIndex: currentColIndex,
-            content: '',
-            height: 0,
-            isFilled: false,
-          };
-          nextColumn.splice(emptyContIndex + 1, 0, emptyAfter);
+        // Правило: если поток продолжился в следующую колонку/страницу, в этой колонке
+        // не нужен хвостовой пустой контейнер (иначе выглядит как «лишний»).
+        if (flow.length === 0) {
+          const remainingLines = Math.max(0, maxLines - used.lines);
+          ensureEmptyContainerAtEnd(column, colIdx, remainingLines);
         }
       }
-    }
+    };
 
-    updateCurrentPageData({ columns: newColumns });
-  }, [articles, currentPage, currentPageData, getTemplateForPage, getColumnUsedSpace, updateCurrentPageData]);
+    setPagesData(prev => {
+      const updated = { ...prev };
+
+      // Рефлоу в текущей странице с позиции вставки
+      let pageNum = currentPage;
+      let template = getTemplateForPage(pageNum);
+      const basePageData = updated[pageNum] || initPageData(pageNum, template);
+      const newColumns = (basePageData.columns && basePageData.columns.length > 0 ? basePageData.columns : buildEmptyColumns(template))
+        .map(col => col.map(cont => ({ ...cont })));
+
+      // Если дропнули «в конец» колонки, а последний контейнер пустой — считаем, что дропнули В него,
+      // иначе он останется висеть выше и будет ломать расчёты/выглядеть как лишний.
+      const startColumn = newColumns[columnIndex] || [];
+      let normalizedInsertIndex = Math.min(containerIndex, startColumn.length);
+      if (
+        normalizedInsertIndex === startColumn.length &&
+        normalizedInsertIndex > 0 &&
+        !startColumn[normalizedInsertIndex - 1].isFilled
+      ) {
+        normalizedInsertIndex -= 1;
+      }
+
+      const flow: FlowItem[] = [];
+      collectTailFromColumns(newColumns, template.columns, columnIndex, normalizedInsertIndex, flow);
+      flow.unshift({ articleId: article.id, html: article.content, source: 'new' });
+      packFlowIntoPageColumns(flow, newColumns, template, columnIndex);
+
+      updated[pageNum] = { ...basePageData, columns: newColumns };
+
+      // Если flow остался — переносим на следующую страницу в 1-ю колонку
+      while (flow.length > 0 && pageNum < TOTAL_PAGES) {
+        pageNum += 1;
+        template = getTemplateForPage(pageNum);
+        const nextPageData = updated[pageNum] || initPageData(pageNum, template);
+        const nextColumns = (nextPageData.columns && nextPageData.columns.length > 0 ? nextPageData.columns : buildEmptyColumns(template))
+          .map(col => col.map(cont => ({ ...cont })));
+
+        // Сдвигаем существующий контент следующей страницы вниз: добавляем его хвост в flow
+        collectTailFromColumns(nextColumns, template.columns, 0, 0, flow);
+        packFlowIntoPageColumns(flow, nextColumns, template, 0);
+        updated[pageNum] = { ...nextPageData, columns: nextColumns };
+      }
+
+      return updated;
+    });
+  }, [articles, buildEmptyColumns, currentPage, getColumnCapacity, getColumnUsedSpace, getTemplateForPage, ensureEmptyContainerAtEnd]);
 
   const handleDropIllustration = useCallback((illustrationId: string, columnIndex: number, positionIndex: number) => {
     const illustration = allIllustrations.find(ill => ill.id === illustrationId);

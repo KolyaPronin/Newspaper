@@ -74,10 +74,15 @@ const PageLayout: React.FC<PageLayoutProps> = ({
 
       <div className="page-content">
         {columns.map((columnContainers, colIndex) => {
-          const hasIllustration = template.illustrationPositions.some(
+          const illustrationSlotsCount = template.illustrationPositions.filter(
             pos => pos.allowedColumns.includes(colIndex)
-          );
-          const illustrationHeight = hasIllustration ? 120 : 0;
+          ).length;
+          const hasIllustration = illustrationSlotsCount > 0;
+          const illustrationSlotHeightPx = 120;
+          const illustrationGapPx = 12;
+          const illustrationHeight = hasIllustration
+            ? (illustrationSlotsCount * illustrationSlotHeightPx) + ((illustrationSlotsCount - 1) * illustrationGapPx)
+            : 0;
           
           return (
             <div
@@ -105,43 +110,63 @@ const PageLayout: React.FC<PageLayoutProps> = ({
                       </div>
                     </div>
                   ) : (
-                    columnContainers.map((container, containerIdx) => {
-                      const isLast = containerIdx === columnContainers.length - 1;
-                      return (
-                        <div
-                          key={container.id}
-                          className={`column-container ${container.isFilled ? 'filled' : 'empty'}`}
-                          onDrop={(e) => handleDrop(e, colIndex, containerIdx)}
-                          onDragOver={handleDragOver}
-                          style={{ marginBottom: isLast ? '0' : '8px' }}
-                        >
-                          {container.isFilled ? (
-                            <div className="container-content">
-                              <div
-                                className="article-content"
-                                dangerouslySetInnerHTML={{ __html: container.content }}
-                              />
-                              {onDeleteContainer && (
-                                <button
-                                  className="delete-container-btn"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onDeleteContainer(colIndex, containerIdx);
-                                  }}
-                                  title="Удалить текст"
-                                >
-                                  ✕
-                                </button>
+                    <>
+                      <div
+                        className="container-drop-zone"
+                        onDrop={(e) => handleDrop(e, colIndex, 0)}
+                        onDragOver={handleDragOver}
+                      />
+                      {columnContainers.map((container, containerIdx) => {
+                        const isLast = containerIdx === columnContainers.length - 1;
+                        return (
+                          <React.Fragment key={container.id}>
+                            <div
+                              className={`column-container ${container.isFilled ? 'filled' : 'empty'}`}
+                              onDrop={(e) => handleDrop(e, colIndex, containerIdx)}
+                              onDragOver={handleDragOver}
+                              style={{ marginBottom: isLast ? '0' : '8px' }}
+                            >
+                              {container.isFilled ? (
+                                <div className="container-content">
+                                  <div
+                                    className="article-content"
+                                    dangerouslySetInnerHTML={{ __html: container.content }}
+                                  />
+                                  {onDeleteContainer && (
+                                    <button
+                                      className="delete-container-btn"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        onDeleteContainer(colIndex, containerIdx);
+                                      }}
+                                      title="Удалить текст"
+                                    >
+                                      ✕
+                                    </button>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="container-empty-text">
+                                  Перетащите статью сюда
+                                </div>
                               )}
                             </div>
-                          ) : (
-                            <div className="container-empty-text">
-                              Перетащите статью сюда
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })
+                            {!isLast && (
+                              <div
+                                className="container-drop-zone"
+                                onDrop={(e) => handleDrop(e, colIndex, containerIdx + 1)}
+                                onDragOver={handleDragOver}
+                              />
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                      <div
+                        className="container-drop-zone"
+                        onDrop={(e) => handleDrop(e, colIndex, columnContainers.length)}
+                        onDragOver={handleDragOver}
+                      />
+                    </>
                   )}
                 </div>
               </div>

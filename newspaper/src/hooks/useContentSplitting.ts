@@ -1,24 +1,46 @@
-import { CHARS_PER_COLUMN, LINES_PER_COLUMN, getTextLength, getTextLines } from './contentMetrics';
+import { CHARS_PER_COLUMN, CHARS_PER_LINE, LINES_PER_COLUMN, getTextLength, getTextLines } from './contentMetrics';
 import { splitByParagraphs, splitByLines, splitBlocks } from './contentSplitHelpers';
+
+ const splitTextAtWordBoundary = (text: string, maxChars: number): { first: string; rest: string } => {
+   if (maxChars <= 0) return { first: '', rest: text };
+   if (text.length <= maxChars) return { first: text, rest: '' };
+   const slice = text.substring(0, maxChars);
+   const lastSpace = slice.lastIndexOf(' ');
+   const cut = lastSpace > Math.floor(maxChars * 0.6) ? lastSpace : maxChars;
+   return {
+     first: text.substring(0, cut).trimEnd(),
+     rest: text.substring(cut).trimStart(),
+   };
+ };
 
 // Экспортируем константы и функции
 export { CHARS_PER_COLUMN, LINES_PER_COLUMN, getTextLength, getTextLines } from './contentMetrics';
 
 // Проверить, есть ли место в контейнере
-export const hasSpaceInContainer = (content: string): boolean => {
+export const hasSpaceInContainer = (
+  content: string,
+  maxChars: number = CHARS_PER_COLUMN,
+  maxLines: number = LINES_PER_COLUMN
+): boolean => {
   const length = getTextLength(content);
   const lines = getTextLines(content);
-  return length < CHARS_PER_COLUMN && lines < LINES_PER_COLUMN;
+  return length < maxChars && lines < maxLines;
 };
 
 // Разбить контент на части, которые помещаются в контейнер
-export const splitContentToFitContainer = (html: string): string[] => {
+export const splitContentToFitContainer = (
+  html: string,
+  maxChars: number = CHARS_PER_COLUMN,
+  maxLines: number = LINES_PER_COLUMN
+): string[] => {
   const parts: string[] = [];
   const blocks = splitBlocks(html);
-  
+
   if (blocks.length === 0) {
     return [html];
   }
+
+  const effectiveMaxChars = Math.min(maxChars, maxLines * CHARS_PER_LINE);
 
   let currentPart = '';
   let currentLength = 0;
@@ -28,9 +50,9 @@ export const splitContentToFitContainer = (html: string): string[] => {
     const block = blocks[i];
     const blockLength = getTextLength(block);
     const blockLines = getTextLines(block);
-    
+
     // Если один блок слишком длинный, разбиваем его на части
-    if (blockLength > CHARS_PER_COLUMN) {
+    if (blockLength > effectiveMaxChars) {
       // Сохраняем текущую часть, если она есть
       if (currentPart) {
         parts.push(currentPart);
@@ -38,25 +60,25 @@ export const splitContentToFitContainer = (html: string): string[] => {
         currentLength = 0;
         currentLines = 0;
       }
-      
+
       // Разбиваем длинный блок на части
       const parser = new DOMParser();
       const doc = parser.parseFromString(block, 'text/html');
       const text = doc.body.textContent || '';
       const tagName = doc.body.firstElementChild?.tagName.toLowerCase() || 'p';
-      
-      // Разбиваем текст на части по CHARS_PER_COLUMN
-      for (let charIndex = 0; charIndex < text.length; charIndex += CHARS_PER_COLUMN) {
-        const partText = text.substring(charIndex, charIndex + CHARS_PER_COLUMN);
+
+      // Разбиваем текст на части по effectiveMaxChars
+      for (let charIndex = 0; charIndex < text.length; charIndex += effectiveMaxChars) {
+        const partText = text.substring(charIndex, charIndex + effectiveMaxChars);
         const partHTML = `<${tagName}>${partText}</${tagName}>`;
         parts.push(partHTML);
       }
       continue;
     }
-    
+
     // Проверяем, поместится ли блок в текущую часть
-    if (currentLength + blockLength <= CHARS_PER_COLUMN && 
-        currentLines + blockLines <= LINES_PER_COLUMN) {
+    if (currentLength + blockLength <= effectiveMaxChars && 
+        currentLines + blockLines <= maxLines) {
       // Блок помещается, добавляем к текущей части
       currentPart += block;
       currentLength += blockLength;
@@ -75,9 +97,8 @@ export const splitContentToFitContainer = (html: string): string[] => {
         const doc = parser.parseFromString(block, 'text/html');
         const text = doc.body.textContent || '';
         const tagName = doc.body.firstElementChild?.tagName.toLowerCase() || 'p';
-        const maxChars = CHARS_PER_COLUMN;
-        const truncated = text.substring(0, maxChars);
-        parts.push(`<${tagName}>${truncated}...</${tagName}>`);
+        const truncated = text.substring(0, Math.max(0, effectiveMaxChars));
+        parts.push(`<${tagName}>${truncated}</${tagName}>`);
         currentPart = '';
         currentLength = 0;
         currentLines = 0;
@@ -97,63 +118,80 @@ export const splitContentToFitContainer = (html: string): string[] => {
 export const splitContentToFitWithRemaining = (
   html: string,
   usedChars: number = 0,
-  usedLines: number = 0
-): { parts: string[]; fillsContainer: boolean } => {
-  const availableChars = CHARS_PER_COLUMN - usedChars;
-  const availableLines = LINES_PER_COLUMN - usedLines;
-  
+  usedLines: number = 0,
+  maxChars: number = CHARS_PER_COLUMN,
+  maxLines: number = LINES_PER_COLUMN
+): { parts: string[]; remainingHtml: string; fillsContainer: boolean } => {
+  const availableCharsRaw = maxChars - usedChars;
+  const availableLines = maxLines - usedLines;
+  const availableChars = Math.min(availableCharsRaw, availableLines * CHARS_PER_LINE);
+
   // Если нет доступного места, возвращаем пустой массив
   if (availableChars <= 0 || availableLines <= 0) {
-    return { parts: [], fillsContainer: true };
+    return { parts: [], remainingHtml: html, fillsContainer: true };
   }
 
-  const parts: string[] = [];
-  let remaining = html;
-  let currentPart = '';
-  let currentLength = 0;
-  let currentLines = 0;
+  const blocks = splitBlocks(html);
 
-  const blocks = splitBlocks(remaining);
+  let fittingPart = '';
+  let fittingLength = 0;
+  let fittingLines = 0;
 
-  for (const block of blocks) {
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
     const blockLength = getTextLength(block);
     const blockLines = getTextLines(block);
 
-    // Проверяем, поместится ли блок в доступное место
-    if (currentLength + blockLength <= availableChars && 
-        currentLines + blockLines <= availableLines) {
-      currentPart += block;
-      currentLength += blockLength;
-      currentLines += blockLines;
-    } else {
-      // Блок не помещается
-      if (currentPart) {
-        parts.push(currentPart);
-        // Проверяем, заполнил ли контейнер полностью
-        const fills = (currentLength >= availableChars * 0.95) || (currentLines >= availableLines * 0.95);
-        return { parts, fillsContainer: fills };
-      } else {
-        // Даже один блок не помещается - обрезаем его
+    if (fittingLength + blockLength <= availableChars && fittingLines + blockLines <= availableLines) {
+      fittingPart += block;
+      fittingLength += blockLength;
+      fittingLines += blockLines;
+      continue;
+    }
+
+    // Блок не помещается
+    if (fittingPart) {
+      const remainingChars = Math.max(0, availableChars - fittingLength);
+      const remainingLines = Math.max(0, availableLines - fittingLines);
+      const allowedChars = Math.min(remainingChars, remainingLines * CHARS_PER_LINE);
+
+      if (allowedChars > 0) {
         const parser = new DOMParser();
         const doc = parser.parseFromString(block, 'text/html');
         const text = doc.body.textContent || '';
-        const truncated = text.substring(0, Math.max(0, availableChars - 10));
-        if (truncated) {
-          parts.push(`<p>${truncated}...</p>`);
-        }
-        return { parts, fillsContainer: true };
+        const tagName = doc.body.firstElementChild?.tagName.toLowerCase() || 'p';
+        const { first, rest } = splitTextAtWordBoundary(text, allowedChars);
+
+        const firstHtml = first ? `<${tagName}>${first}</${tagName}>` : '';
+        const restHtml = rest ? `<${tagName}>${rest}</${tagName}>` : '';
+        const combined = fittingPart + firstHtml;
+        const remainingHtml = restHtml + blocks.slice(i + 1).join('');
+
+        return { parts: combined ? [combined] : [], remainingHtml, fillsContainer: true };
       }
+
+      const remainingHtml = blocks.slice(i).join('');
+      const fills = (fittingLength >= availableChars * 0.95) || (fittingLines >= availableLines * 0.95);
+      return { parts: [fittingPart], remainingHtml, fillsContainer: fills };
     }
+
+    // Даже один блок не помещается: делим этот блок на 2 части (без троеточий, чтобы поток продолжался)
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(block, 'text/html');
+    const text = doc.body.textContent || '';
+    const tagName = doc.body.firstElementChild?.tagName.toLowerCase() || 'p';
+    const firstText = text.substring(0, Math.max(0, availableChars));
+    const restText = text.substring(Math.max(0, availableChars));
+
+    const firstHtml = firstText ? `<${tagName}>${firstText}</${tagName}>` : '';
+    const restHtml = restText ? `<${tagName}>${restText}</${tagName}>` : '';
+    const remainingHtml = restHtml + blocks.slice(i + 1).join('');
+
+    const fills = true;
+    return { parts: firstHtml ? [firstHtml] : [], remainingHtml, fillsContainer: fills };
   }
 
   // Весь контент поместился
-  if (currentPart) {
-    parts.push(currentPart);
-    // Проверяем, заполнил ли контейнер полностью
-    const fills = (currentLength >= availableChars * 0.95) || (currentLines >= availableLines * 0.95);
-    return { parts, fillsContainer: fills };
-  }
-
-  return { parts: [html], fillsContainer: false };
+  const fills = (fittingLength >= availableChars * 0.95) || (fittingLines >= availableLines * 0.95);
+  return { parts: fittingPart ? [fittingPart] : [], remainingHtml: '', fillsContainer: fills };
 };
-

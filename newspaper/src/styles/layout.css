@@ -369,6 +369,11 @@
   min-height: 0;
 }
 
+.container-drop-zone {
+  height: 10px;
+  flex: 0 0 auto;
+}
+
 .column-container {
   display: flex;
   flex-direction: column;
@@ -386,9 +391,9 @@
   padding: 20px;
   background: rgba(6, 191, 204, 0.05);
   cursor: pointer;
-  flex-shrink: 0;
-  min-height: 100px;
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -415,6 +420,23 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+}
+
+.article-content p {
+  margin: 0 0 6px 0;
+}
+
+.article-content p:last-child {
+  margin-bottom: 0;
+}
+
+.article-content h1,
+.article-content h2,
+.article-content h3,
+.article-content h4,
+.article-content h5,
+.article-content h6 {
+  margin: 0 0 6px 0;
 }
 
 .container-empty-text {

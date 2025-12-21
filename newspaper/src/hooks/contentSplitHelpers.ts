@@ -1,4 +1,4 @@
-import { CHARS_PER_COLUMN, LINES_PER_COLUMN, getTextLines } from './contentMetrics';
+import { CHARS_PER_COLUMN, CHARS_PER_LINE, LINES_PER_COLUMN, getTextLines } from './contentMetrics';
 
 // Разбить контент по параграфам
 export const splitByParagraphs = (html: string): string[] => {
@@ -31,7 +31,7 @@ export const splitByLines = (html: string, maxLines: number): string[] => {
 
   for (const word of words) {
     const testLine = currentLine ? `${currentLine} ${word}` : word;
-    const testLines = Math.ceil(testLine.length / 40);
+    const testLines = Math.ceil(testLine.length / CHARS_PER_LINE);
     
     if (testLines > maxLines && currentLine) {
       result.push(`<p>${currentLine}</p>`);

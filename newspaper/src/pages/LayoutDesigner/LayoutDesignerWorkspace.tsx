@@ -18,6 +18,8 @@ interface PageData {
   layoutIllustrations: LayoutIllustration[];
 }
 
+type FlowItem = { articleId?: string; html: string; source: 'existing' | 'new' };
+
 const LayoutDesignerWorkspace: React.FC = () => {
   const { articles } = useArticles();
   const [templates, setTemplates] = useState<PageTemplate[]>([]);
@@ -57,6 +59,30 @@ const LayoutDesignerWorkspace: React.FC = () => {
     };
   }, [pagesData, currentPage]);
 
+  const globalFirstOccurrenceByArticleId = useMemo(() => {
+    const map = new Map<string, { pageNum: number; colIndex: number; containerIdx: number }>();
+
+    // Считаем по всем страницам макета (кроме обложки)
+    for (let pageNum = 2; pageNum <= TOTAL_PAGES; pageNum++) {
+      const template = getTemplateForPage(pageNum);
+      const page = pagesData[pageNum];
+      const cols = page?.columns || [];
+
+      for (let colIndex = 0; colIndex < template.columns; colIndex++) {
+        const column = cols[colIndex] || [];
+        for (let containerIdx = 0; containerIdx < column.length; containerIdx++) {
+          const c = column[containerIdx];
+          if (!c || !c.isFilled || !c.articleId) continue;
+          if (!map.has(c.articleId)) {
+            map.set(c.articleId, { pageNum, colIndex, containerIdx });
+          }
+        }
+      }
+    }
+
+    return map;
+  }, [getTemplateForPage, pagesData]);
+
   const buildEmptyColumns = useCallback((template: PageTemplate): ColumnContainer[][] => {
     const initialColumns: ColumnContainer[][] = [];
     for (let i = 0; i < template.columns; i++) {
@@ -72,6 +98,188 @@ const LayoutDesignerWorkspace: React.FC = () => {
     }
     return initialColumns;
   }, []);
+
+  const getPlainText = useCallback((html: string): string => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    return (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
+  }, []);
+
+  const articleTextIndex = useMemo(() => {
+    const map = new Map<string, string>();
+    for (let i = 0; i < articles.length; i++) {
+      const a = articles[i];
+      if (!map.has(a.id)) {
+        map.set(a.id, getPlainText(a.content));
+      }
+    }
+    return map;
+  }, [articles, getPlainText]);
+
+  const inferArticleIdFromHtml = useCallback((html: string): string | undefined => {
+    const text = getPlainText(html);
+    if (!text) return undefined;
+    const probe = text.slice(0, Math.min(80, text.length));
+    if (probe.length < 30) return undefined;
+
+    const entries = Array.from(articleTextIndex.entries());
+    for (let i = 0; i < entries.length; i++) {
+      const id = entries[i][0];
+      const fullText = entries[i][1];
+      if (fullText.includes(probe)) return id;
+    }
+    return undefined;
+  }, [articleTextIndex, getPlainText]);
+
+  const initPageData = useCallback((pageNum: number, template: PageTemplate): PageData => {
+    return {
+      columns: buildEmptyColumns(template),
+      headerContent: pageNum === 1 ? '' : (template.headers?.content || 'Заголовок газеты'),
+      layoutTitle: pageNum === 1 ? 'Обложка' : `Страница ${pageNum}`,
+      layoutId: null,
+      layoutIllustrations: [],
+    };
+  }, [buildEmptyColumns]);
+
+  const collectTailFromColumns = useCallback((
+    columns: ColumnContainer[][],
+    templateColumnsCount: number,
+    startColIndex: number,
+    startContainerIndex: number,
+    into: FlowItem[],
+    skipArticleId?: string
+  ) => {
+    const pushMergedExisting = (item: FlowItem) => {
+      const last = into.length > 0 ? into[into.length - 1] : undefined;
+      if (
+        last &&
+        last.source === 'existing' &&
+        item.source === 'existing' &&
+        last.articleId &&
+        item.articleId &&
+        last.articleId === item.articleId
+      ) {
+        last.html += item.html;
+        return;
+      }
+      into.push(item);
+    };
+
+    for (let colIdx = startColIndex; colIdx < templateColumnsCount; colIdx++) {
+      const column = columns[colIdx];
+      if (!column) continue;
+      const startIdx = colIdx === startColIndex ? Math.min(startContainerIndex, column.length) : 0;
+      const removed = column.splice(startIdx);
+      removed.forEach(cont => {
+        if (cont.isFilled && cont.content) {
+          const resolvedArticleId = cont.articleId || inferArticleIdFromHtml(cont.content);
+          if (skipArticleId && resolvedArticleId === skipArticleId) return;
+          pushMergedExisting({ articleId: resolvedArticleId, html: cont.content, source: 'existing' });
+        }
+      });
+    }
+  }, [inferArticleIdFromHtml]);
+
+  function packFlowIntoPageColumns(
+    flow: FlowItem[],
+    columns: ColumnContainer[][],
+    template: PageTemplate,
+    startColIndex: number
+  ) {
+    for (let colIdx = startColIndex; colIdx < template.columns && flow.length > 0; colIdx++) {
+      const column = columns[colIdx] || [];
+      columns[colIdx] = column;
+
+      for (let i = column.length - 1; i >= 0; i--) {
+        if (!column[i].isFilled) {
+          column.splice(i, 1);
+        }
+      }
+
+      const { maxChars, maxLines } = getColumnCapacity(template, colIdx);
+      let used = getColumnUsedSpace(column);
+
+      while (flow.length > 0) {
+        const current = flow[0];
+        const { parts, remainingHtml } = splitContentToFitWithRemaining(
+          current.html,
+          used.chars,
+          used.lines,
+          maxChars,
+          maxLines
+        );
+
+        if (parts.length === 0) {
+          break;
+        }
+
+        const filled: ColumnContainer = {
+          id: `col_${colIdx}_container_${Date.now()}_${Math.random()}`,
+          columnIndex: colIdx,
+          content: parts[0],
+          height: 0,
+          isFilled: true,
+          articleId: current.articleId,
+        };
+        column.push(filled);
+
+        used = getColumnUsedSpace(column);
+
+        if (remainingHtml) {
+          current.html = remainingHtml;
+          break;
+        }
+
+        flow.shift();
+      }
+
+      if (flow.length === 0) {
+        const remainingLines = Math.max(0, maxLines - used.lines);
+        ensureEmptyContainerAtEnd(column, colIdx, remainingLines);
+      }
+    }
+  }
+
+  function reflowFromPosition(
+    prev: Record<number, PageData>,
+    startPage: number,
+    startColIndex: number,
+    startContainerIndex: number,
+    prepend: FlowItem[],
+    skipArticleId?: string
+  ): Record<number, PageData> {
+    const updated = { ...prev };
+    const flow: FlowItem[] = [];
+
+    for (let pageNum = startPage; pageNum <= TOTAL_PAGES; pageNum++) {
+      const template = getTemplateForPage(pageNum);
+      const basePageData = updated[pageNum] || initPageData(pageNum, template);
+      const pageColumns = (basePageData.columns && basePageData.columns.length > 0 ? basePageData.columns : buildEmptyColumns(template))
+        .map(col => col.map(cont => ({ ...cont })));
+
+      if (pageNum === startPage) {
+        collectTailFromColumns(pageColumns, template.columns, startColIndex, startContainerIndex, flow, skipArticleId);
+      } else {
+        collectTailFromColumns(pageColumns, template.columns, 0, 0, flow, skipArticleId);
+      }
+
+      updated[pageNum] = { ...basePageData, columns: pageColumns };
+    }
+
+    if (prepend.length > 0) {
+      flow.unshift(...prepend);
+    }
+
+    for (let pageNum = startPage; pageNum <= TOTAL_PAGES; pageNum++) {
+      const template = getTemplateForPage(pageNum);
+      const basePageData = updated[pageNum] || initPageData(pageNum, template);
+      const pageColumns = (basePageData.columns && basePageData.columns.length > 0 ? basePageData.columns : buildEmptyColumns(template));
+      packFlowIntoPageColumns(flow, pageColumns, template, pageNum === startPage ? startColIndex : 0);
+      updated[pageNum] = { ...basePageData, columns: pageColumns };
+    }
+
+    return updated;
+  }
 
   const resetPageData = useCallback((pageNumber: number, template: PageTemplate) => {
     const newPagesData = { ...pagesData };
@@ -427,187 +635,79 @@ const LayoutDesignerWorkspace: React.FC = () => {
   }, []);
 
   const handleDeleteContainer = useCallback((columnIndex: number, containerIndex: number) => {
-    updateCurrentPageData({
-      columns: currentPageData.columns.map((col, colIdx) => {
-        if (colIdx !== columnIndex) return col;
-        const newCol = [...col];
-        const target = newCol[containerIndex];
-        if (target) {
-          // «Удалить текст» = очистить контейнер, а не удалять его из списка.
-          // Иначе у колонки визуально «пропадает место/дроп-зона».
-          newCol[containerIndex] = {
-            ...target,
+    setPagesData(prev => {
+      const current = prev[currentPage] || {
+        columns: [],
+        headerContent: currentPage === 1 ? '' : 'Заголовок газеты',
+        layoutTitle: currentPage === 1 ? 'Обложка' : `Страница ${currentPage}`,
+        layoutId: null,
+        layoutIllustrations: [],
+      };
+
+      const col = current.columns[columnIndex];
+      const cont = col ? col[containerIndex] : undefined;
+      if (!cont || !cont.isFilled || !cont.content) return prev;
+
+      const deleteArticleId = cont.articleId || inferArticleIdFromHtml(cont.content);
+      if (!deleteArticleId) {
+        const template = getTemplateForPage(currentPage);
+        const basePageData = prev[currentPage] || initPageData(currentPage, template);
+        const columns = (basePageData.columns && basePageData.columns.length > 0 ? basePageData.columns : buildEmptyColumns(template))
+          .map(col2 => col2.map(c => ({ ...c })));
+        if (columns[columnIndex] && columns[columnIndex][containerIndex]) {
+          columns[columnIndex][containerIndex] = {
+            ...columns[columnIndex][containerIndex],
             content: '',
             isFilled: false,
             articleId: undefined,
           };
         }
-        return newCol;
-      }),
+        return { ...prev, [currentPage]: { ...basePageData, columns } };
+      }
+
+      let startPage = -1;
+      let startCol = -1;
+      let startContainer = -1;
+
+      for (let pageNum = 1; pageNum <= TOTAL_PAGES; pageNum++) {
+        const template = getTemplateForPage(pageNum);
+        const basePageData = prev[pageNum] || initPageData(pageNum, template);
+        const cols = basePageData.columns || [];
+        for (let c = 0; c < template.columns; c++) {
+          const column = cols[c] || [];
+          for (let i = 0; i < column.length; i++) {
+            const candidate = column[i];
+            if (!candidate.isFilled || !candidate.content) continue;
+            const resolved = candidate.articleId || inferArticleIdFromHtml(candidate.content);
+            if (resolved === deleteArticleId) {
+              startPage = pageNum;
+              startCol = c;
+              startContainer = i;
+              break;
+            }
+          }
+          if (startPage !== -1) break;
+        }
+        if (startPage !== -1) break;
+      }
+
+      if (startPage === -1) return prev;
+
+      return reflowFromPosition(prev, startPage, startCol, startContainer, [], deleteArticleId);
     });
-  }, [currentPageData, updateCurrentPageData]);
+  }, [currentPage, getTemplateForPage, inferArticleIdFromHtml, initPageData, reflowFromPosition]);
 
   const handleDropArticle = useCallback((articleId: string, columnIndex: number, containerIndex: number) => {
     const article = articles.find(a => a.id === articleId);
     if (!article) return;
 
-    type FlowItem = { articleId?: string; html: string; source: 'existing' | 'new' };
-
-    const getPlainText = (html: string): string => {
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, 'text/html');
-      return (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
-    };
-
-    // Для старых/загруженных макетов articleId может быть пустым.
-    // Тогда «склейка» и нормальный рефлоу невозможны. Пытаемся восстановить articleId по содержимому.
-    const inferArticleIdFromHtml = (() => {
-      const articleTextIndex = new Map<string, string>();
-      for (const a of articles) {
-        if (!articleTextIndex.has(a.id)) {
-          articleTextIndex.set(a.id, getPlainText(a.content));
-        }
-      }
-
-      return (html: string): string | undefined => {
-        const text = getPlainText(html);
-        if (!text) return undefined;
-        const probe = text.slice(0, Math.min(80, text.length));
-        if (probe.length < 30) return undefined;
-
-        const entries = Array.from(articleTextIndex.entries());
-        for (let i = 0; i < entries.length; i++) {
-          const id = entries[i][0];
-          const fullText = entries[i][1];
-          if (fullText.includes(probe)) return id;
-        }
-        return undefined;
-      };
-    })();
-
-    const initPageData = (pageNum: number, template: PageTemplate): PageData => {
-      return {
-        columns: buildEmptyColumns(template),
-        headerContent: pageNum === 1 ? '' : (template.headers?.content || 'Заголовок газеты'),
-        layoutTitle: pageNum === 1 ? 'Обложка' : `Страница ${pageNum}`,
-        layoutId: null,
-        layoutIllustrations: [],
-      };
-    };
-
-    const collectTailFromColumns = (
-      columns: ColumnContainer[][],
-      templateColumnsCount: number,
-      startColIndex: number,
-      startContainerIndex: number,
-      into: FlowItem[]
-    ) => {
-      const pushMergedExisting = (item: FlowItem) => {
-        const last = into.length > 0 ? into[into.length - 1] : undefined;
-        if (
-          last &&
-          last.source === 'existing' &&
-          item.source === 'existing' &&
-          last.articleId &&
-          item.articleId &&
-          last.articleId === item.articleId
-        ) {
-          last.html += item.html;
-          return;
-        }
-        into.push(item);
-      };
-
-      for (let colIdx = startColIndex; colIdx < templateColumnsCount; colIdx++) {
-        const column = columns[colIdx];
-        if (!column) continue;
-        const startIdx = colIdx === startColIndex ? Math.min(startContainerIndex, column.length) : 0;
-        const removed = column.splice(startIdx);
-        removed.forEach(cont => {
-          if (cont.isFilled && cont.content) {
-            const resolvedArticleId = cont.articleId || inferArticleIdFromHtml(cont.content);
-            pushMergedExisting({ articleId: resolvedArticleId, html: cont.content, source: 'existing' });
-          }
-        });
-      }
-    };
-
-    const packFlowIntoPageColumns = (
-      flow: FlowItem[],
-      columns: ColumnContainer[][],
-      template: PageTemplate,
-      startColIndex: number
-    ) => {
-      for (let colIdx = startColIndex; colIdx < template.columns && flow.length > 0; colIdx++) {
-        const column = columns[colIdx] || [];
-        columns[colIdx] = column;
-
-        // Убираем любые пустые контейнеры перед упаковкой, чтобы они не влияли на оверхед/ёмкость.
-        // Новые пустые зоны создаются только через ensureEmptyContainerAtEnd.
-        for (let i = column.length - 1; i >= 0; i--) {
-          if (!column[i].isFilled) {
-            column.splice(i, 1);
-          }
-        }
-        const { maxChars, maxLines } = getColumnCapacity(template, colIdx);
-        let used = getColumnUsedSpace(column);
-
-        while (flow.length > 0) {
-          const current = flow[0];
-          const { parts, remainingHtml } = splitContentToFitWithRemaining(
-            current.html,
-            used.chars,
-            used.lines,
-            maxChars,
-            maxLines
-          );
-
-          if (parts.length === 0) {
-            break;
-          }
-
-          const filled: ColumnContainer = {
-            id: `col_${colIdx}_container_${Date.now()}_${Math.random()}`,
-            columnIndex: colIdx,
-            content: parts[0],
-            height: 0,
-            isFilled: true,
-            articleId: current.articleId,
-          };
-          column.push(filled);
-
-          used = getColumnUsedSpace(column);
-
-          if (remainingHtml) {
-            current.html = remainingHtml;
-            break;
-          }
-
-          flow.shift();
-        }
-
-        // Правило: если поток продолжился в следующую колонку/страницу, в этой колонке
-        // не нужен хвостовой пустой контейнер (иначе выглядит как «лишний»).
-        if (flow.length === 0) {
-          const remainingLines = Math.max(0, maxLines - used.lines);
-          ensureEmptyContainerAtEnd(column, colIdx, remainingLines);
-        }
-      }
-    };
-
     setPagesData(prev => {
-      const updated = { ...prev };
-
-      // Рефлоу в текущей странице с позиции вставки
-      let pageNum = currentPage;
-      let template = getTemplateForPage(pageNum);
-      const basePageData = updated[pageNum] || initPageData(pageNum, template);
-      const newColumns = (basePageData.columns && basePageData.columns.length > 0 ? basePageData.columns : buildEmptyColumns(template))
+      const template = getTemplateForPage(currentPage);
+      const basePageData = prev[currentPage] || initPageData(currentPage, template);
+      const columns = (basePageData.columns && basePageData.columns.length > 0 ? basePageData.columns : buildEmptyColumns(template))
         .map(col => col.map(cont => ({ ...cont })));
 
-      // Если дропнули «в конец» колонки, а последний контейнер пустой — считаем, что дропнули В него,
-      // иначе он останется висеть выше и будет ломать расчёты/выглядеть как лишний.
-      const startColumn = newColumns[columnIndex] || [];
+      const startColumn = columns[columnIndex] || [];
       let normalizedInsertIndex = Math.min(containerIndex, startColumn.length);
       if (
         normalizedInsertIndex === startColumn.length &&
@@ -617,30 +717,17 @@ const LayoutDesignerWorkspace: React.FC = () => {
         normalizedInsertIndex -= 1;
       }
 
-      const flow: FlowItem[] = [];
-      collectTailFromColumns(newColumns, template.columns, columnIndex, normalizedInsertIndex, flow);
-      flow.unshift({ articleId: article.id, html: article.content, source: 'new' });
-      packFlowIntoPageColumns(flow, newColumns, template, columnIndex);
-
-      updated[pageNum] = { ...basePageData, columns: newColumns };
-
-      // Если flow остался — переносим на следующую страницу в 1-ю колонку
-      while (flow.length > 0 && pageNum < TOTAL_PAGES) {
-        pageNum += 1;
-        template = getTemplateForPage(pageNum);
-        const nextPageData = updated[pageNum] || initPageData(pageNum, template);
-        const nextColumns = (nextPageData.columns && nextPageData.columns.length > 0 ? nextPageData.columns : buildEmptyColumns(template))
-          .map(col => col.map(cont => ({ ...cont })));
-
-        // Сдвигаем существующий контент следующей страницы вниз: добавляем его хвост в flow
-        collectTailFromColumns(nextColumns, template.columns, 0, 0, flow);
-        packFlowIntoPageColumns(flow, nextColumns, template, 0);
-        updated[pageNum] = { ...nextPageData, columns: nextColumns };
-      }
-
-      return updated;
+      const next = { ...prev, [currentPage]: { ...basePageData, columns } };
+      return reflowFromPosition(
+        next,
+        currentPage,
+        columnIndex,
+        normalizedInsertIndex,
+        [{ articleId: article.id, html: article.content, source: 'new' }],
+        undefined
+      );
     });
-  }, [articles, buildEmptyColumns, currentPage, getColumnCapacity, getColumnUsedSpace, getTemplateForPage, ensureEmptyContainerAtEnd]);
+  }, [articles, buildEmptyColumns, currentPage, getTemplateForPage, initPageData, reflowFromPosition]);
 
   const handleDropIllustration = useCallback((illustrationId: string, columnIndex: number, positionIndex: number) => {
     const illustration = allIllustrations.find(ill => ill.id === illustrationId);
@@ -747,7 +834,9 @@ const LayoutDesignerWorkspace: React.FC = () => {
                 ) : (
                   <PageLayout
                     template={currentTemplate}
+                    pageNumber={currentPage}
                     columns={currentPageData.columns}
+                    globalFirstOccurrenceByArticleId={globalFirstOccurrenceByArticleId}
                     onDropArticle={handleDropArticle}
                     onDeleteContainer={handleDeleteContainer}
                     headerContent={currentPageData.headerContent}

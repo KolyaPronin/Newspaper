@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { PageTemplate, ColumnContainer, LayoutIllustration } from '../../types/PageTemplate';
 import { Illustration } from '../../utils/api';
 
 export interface PageLayoutProps {
   template: PageTemplate;
+  pageNumber: number;
   columns: ColumnContainer[][];
+  globalFirstOccurrenceByArticleId: Map<string, { pageNum: number; colIndex: number; containerIdx: number }>;
   onDropArticle: (articleId: string, columnIndex: number, containerIndex: number) => void;
   onDeleteContainer?: (columnIndex: number, containerIndex: number) => void;
   headerContent: string;
@@ -17,7 +19,9 @@ export interface PageLayoutProps {
 
 const PageLayout: React.FC<PageLayoutProps> = ({ 
   template, 
+  pageNumber,
   columns, 
+  globalFirstOccurrenceByArticleId,
   onDropArticle, 
   onDeleteContainer, 
   headerContent, 
@@ -27,6 +31,21 @@ const PageLayout: React.FC<PageLayoutProps> = ({
   onDropIllustration,
   onDeleteIllustration,
 }) => {
+  const firstOccurrenceByArticleIdOnPage = useMemo(() => {
+    const map = new Map<string, { colIndex: number; containerIdx: number }>();
+    for (let colIndex = 0; colIndex < columns.length; colIndex++) {
+      const col = columns[colIndex] || [];
+      for (let containerIdx = 0; containerIdx < col.length; containerIdx++) {
+        const c = col[containerIdx];
+        if (!c || !c.isFilled || !c.articleId) continue;
+        if (!map.has(c.articleId)) {
+          map.set(c.articleId, { colIndex, containerIdx });
+        }
+      }
+    }
+    return map;
+  }, [columns]);
+
   const handleDrop = (e: React.DragEvent, columnIndex: number, containerIndex: number) => {
     e.preventDefault();
     const articleId = e.dataTransfer.getData('articleId');
@@ -118,6 +137,32 @@ const PageLayout: React.FC<PageLayoutProps> = ({
                       />
                       {columnContainers.map((container, containerIdx) => {
                         const isLast = containerIdx === columnContainers.length - 1;
+                        const isDeleteButtonAllowed = (() => {
+                          if (!onDeleteContainer) return false;
+                          if (!container.isFilled) return false;
+                          if (!container.articleId) return true;
+
+                          // Показываем ✕ только у "начала" статьи:
+                          // 1) на странице — только у первого фрагмента
+                          // 2) глобально — только если это самое первое появление статьи во всём макете
+                          const firstOnPage = firstOccurrenceByArticleIdOnPage.get(container.articleId);
+                          if (!firstOnPage || firstOnPage.colIndex !== colIndex || firstOnPage.containerIdx !== containerIdx) {
+                            return false;
+                          }
+
+                          const globalFirst = globalFirstOccurrenceByArticleId.get(container.articleId);
+                          if (!globalFirst) {
+                            // Если глобальная карта не содержит статью (например, только что вставили и данные ещё не попали)
+                            // — хотя бы не показываем множество крестиков на странице.
+                            return true;
+                          }
+
+                          return (
+                            globalFirst.pageNum === pageNumber &&
+                            globalFirst.colIndex === colIndex &&
+                            globalFirst.containerIdx === containerIdx
+                          );
+                        })();
                         return (
                           <React.Fragment key={container.id}>
                             <div
@@ -132,12 +177,12 @@ const PageLayout: React.FC<PageLayoutProps> = ({
                                     className="article-content"
                                     dangerouslySetInnerHTML={{ __html: container.content }}
                                   />
-                                  {onDeleteContainer && (
+                                  {isDeleteButtonAllowed && (
                                     <button
                                       className="delete-container-btn"
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        onDeleteContainer(colIndex, containerIdx);
+                                        onDeleteContainer?.(colIndex, containerIdx);
                                       }}
                                       title="Удалить текст"
                                     >

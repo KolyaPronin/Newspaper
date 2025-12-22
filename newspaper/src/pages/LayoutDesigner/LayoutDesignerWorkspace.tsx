@@ -18,7 +18,9 @@ interface PageData {
   layoutIllustrations: LayoutIllustration[];
 }
 
-type FlowItem = { articleId?: string; html: string; source: 'existing' | 'new' };
+type FlowItem =
+  | { kind: 'text'; articleId?: string; html: string; source: 'existing' | 'new' }
+  | { kind: 'illustration'; illustrationId: string; span?: 1 | 2; heightPx: number; source: 'existing' | 'new' };
 
 const LayoutDesignerWorkspace: React.FC = () => {
   const { articles } = useArticles();
@@ -153,6 +155,8 @@ const LayoutDesignerWorkspace: React.FC = () => {
       const last = into.length > 0 ? into[into.length - 1] : undefined;
       if (
         last &&
+        last.kind === 'text' &&
+        item.kind === 'text' &&
         last.source === 'existing' &&
         item.source === 'existing' &&
         last.articleId &&
@@ -174,7 +178,15 @@ const LayoutDesignerWorkspace: React.FC = () => {
         if (cont.isFilled && cont.content) {
           const resolvedArticleId = cont.articleId || inferArticleIdFromHtml(cont.content);
           if (skipArticleId && resolvedArticleId === skipArticleId) return;
-          pushMergedExisting({ articleId: resolvedArticleId, html: cont.content, source: 'existing' });
+          pushMergedExisting({ kind: 'text', articleId: resolvedArticleId, html: cont.content, source: 'existing' });
+        } else if (cont.isFilled && cont.kind === 'illustration' && cont.illustrationId) {
+          pushMergedExisting({
+            kind: 'illustration',
+            illustrationId: cont.illustrationId,
+            span: cont.span,
+            heightPx: cont.height && cont.height > 0 ? cont.height : 120,
+            source: 'existing',
+          });
         }
       });
     }
@@ -186,6 +198,15 @@ const LayoutDesignerWorkspace: React.FC = () => {
     template: PageTemplate,
     startColIndex: number
   ) {
+    const getExtraOverheadLinesForNewFilledContainer = (existingColumn: ColumnContainer[]): number => {
+      const approxLineHeightPx = 18;
+      const dropZoneHeightPx = 10;
+      const containerGapPx = existingColumn.length > 0 ? 8 : 0;
+      const filledContainerPaddingPx = 16;
+      const deltaPx = dropZoneHeightPx + containerGapPx + filledContainerPaddingPx;
+      return Math.ceil(deltaPx / approxLineHeightPx);
+    };
+
     for (let colIdx = startColIndex; colIdx < template.columns && flow.length > 0; colIdx++) {
       const column = columns[colIdx] || [];
       columns[colIdx] = column;
@@ -196,17 +217,63 @@ const LayoutDesignerWorkspace: React.FC = () => {
         }
       }
 
-      const { maxChars, maxLines } = getColumnCapacity(template, colIdx);
+      const { maxLines: baseMaxLines } = getColumnCapacity(template, colIdx);
       let used = getColumnUsedSpace(column);
 
       while (flow.length > 0) {
         const current = flow[0];
+        const newContainerOverheadLines = getExtraOverheadLinesForNewFilledContainer(column);
+
+        const INLINE_SAFETY_LINES = 8;
+        const columnHasInlineIllustration = column.some(c => c.isFilled && c.kind === 'illustration');
+        const columnHasText = column.some(c => c.isFilled && (c.kind || 'text') === 'text');
+        const willPlaceIllustrationNow = current.kind === 'illustration';
+
+        // Safety нужен в основном когда в колонке смешиваются текст и inline-иллюстрации
+        // (иначе возможен визуальный клип/налезание из-за неточностей метрик).
+        // Для колонки, состоящей только из иллюстраций, быть слишком консервативными не нужно.
+        const shouldApplyInlineSafety =
+          (columnHasInlineIllustration || willPlaceIllustrationNow) && (columnHasText || current.kind === 'text');
+        const effectiveMaxLines = Math.max(
+          1,
+          baseMaxLines - (shouldApplyInlineSafety ? INLINE_SAFETY_LINES : 0)
+        );
+        const effectiveMaxChars = Math.max(
+          1,
+          Math.floor(CHARS_PER_COLUMN * (effectiveMaxLines / LINES_PER_COLUMN))
+        );
+
+        if (current.kind === 'illustration') {
+          const approxLineHeightPx = 18;
+          const inlineIllustrationExtraPx = 60;
+          const needLines = Math.ceil((current.heightPx + inlineIllustrationExtraPx) / approxLineHeightPx);
+          const remainingLines = Math.max(0, effectiveMaxLines - used.lines);
+          if (needLines + newContainerOverheadLines > remainingLines) {
+            break;
+          }
+
+          const illContainer: ColumnContainer = {
+            id: `col_${colIdx}_illus_${Date.now()}_${Math.random()}`,
+            columnIndex: colIdx,
+            content: '',
+            height: current.heightPx,
+            isFilled: true,
+            kind: 'illustration',
+            illustrationId: current.illustrationId,
+            span: current.span,
+          };
+          column.push(illContainer);
+          used = getColumnUsedSpace(column);
+          flow.shift();
+          continue;
+        }
+
         const { parts, remainingHtml } = splitContentToFitWithRemaining(
           current.html,
           used.chars,
-          used.lines,
-          maxChars,
-          maxLines
+          used.lines + newContainerOverheadLines,
+          effectiveMaxChars,
+          effectiveMaxLines
         );
 
         if (parts.length === 0) {
@@ -220,6 +287,7 @@ const LayoutDesignerWorkspace: React.FC = () => {
           height: 0,
           isFilled: true,
           articleId: current.articleId,
+          kind: 'text',
         };
         column.push(filled);
 
@@ -234,7 +302,13 @@ const LayoutDesignerWorkspace: React.FC = () => {
       }
 
       if (flow.length === 0) {
-        const remainingLines = Math.max(0, maxLines - used.lines);
+        const INLINE_SAFETY_LINES = 3;
+        const columnHasInlineIllustration = column.some(c => c.isFilled && c.kind === 'illustration');
+        const effectiveMaxLines = Math.max(
+          1,
+          baseMaxLines - (columnHasInlineIllustration ? INLINE_SAFETY_LINES : 0)
+        );
+        const remainingLines = Math.max(0, effectiveMaxLines - used.lines);
         ensureEmptyContainerAtEnd(column, colIdx, remainingLines);
       }
     }
@@ -268,6 +342,23 @@ const LayoutDesignerWorkspace: React.FC = () => {
 
     if (prepend.length > 0) {
       flow.unshift(...prepend);
+    }
+
+    for (let i = 0; i < flow.length - 1;) {
+      const a = flow[i];
+      const b = flow[i + 1];
+      if (
+        a.kind === 'text' &&
+        b.kind === 'text' &&
+        a.articleId &&
+        b.articleId &&
+        a.articleId === b.articleId
+      ) {
+        a.html += b.html;
+        flow.splice(i + 1, 1);
+        continue;
+      }
+      i += 1;
     }
 
     for (let pageNum = startPage; pageNum <= TOTAL_PAGES; pageNum++) {
@@ -539,12 +630,19 @@ const LayoutDesignerWorkspace: React.FC = () => {
     let totalChars = 0;
     let totalLines = 0;
     let filledCount = 0;
+    const approxLineHeightPx = 18;
+    const inlineIllustrationExtraPx = 28;
     
     column.forEach(cont => {
       if (cont.isFilled) {
         filledCount += 1;
-        totalChars += getTextLength(cont.content);
-        totalLines += getTextLines(cont.content);
+        if (cont.kind === 'illustration') {
+          const h = cont.height && cont.height > 0 ? cont.height : 120;
+          totalLines += Math.ceil((h + inlineIllustrationExtraPx) / approxLineHeightPx);
+        } else {
+          totalChars += getTextLength(cont.content);
+          totalLines += getTextLines(cont.content);
+        }
       }
     });
 
@@ -553,7 +651,6 @@ const LayoutDesignerWorkspace: React.FC = () => {
     // - drop-зоны между контейнерами (10px)
     // - вертикальные отступы между контейнерами (8px)
     // Если это не учитывать, низ текста может визуально клипаться (кажется, что он "уходит под иллюстрацию").
-    const approxLineHeightPx = 18;
     const columnPaddingPx = 24;
     const dropZoneHeightPx = 10;
     const containerGapPx = 8;
@@ -723,11 +820,145 @@ const LayoutDesignerWorkspace: React.FC = () => {
         currentPage,
         columnIndex,
         normalizedInsertIndex,
-        [{ articleId: article.id, html: article.content, source: 'new' }],
+        [{ kind: 'text', articleId: article.id, html: article.content, source: 'new' }],
         undefined
       );
     });
   }, [articles, buildEmptyColumns, currentPage, getTemplateForPage, initPageData, reflowFromPosition]);
+
+  const handleDropInlineIllustration = useCallback((
+    illustrationId: string,
+    columnIndex: number,
+    containerIndex: number,
+    dropRatio?: number
+  ) => {
+    const illustration = allIllustrations.find(ill => ill.id === illustrationId);
+    if (!illustration) return;
+
+    const INLINE_ILLUSTRATION_HEIGHT_PX = 120;
+
+    setPagesData(prev => {
+      const template = getTemplateForPage(currentPage);
+      const basePageData = prev[currentPage] || initPageData(currentPage, template);
+      const columns = (basePageData.columns && basePageData.columns.length > 0 ? basePageData.columns : buildEmptyColumns(template))
+        .map(col => col.map(cont => ({ ...cont })));
+
+      const startColumn = columns[columnIndex] || [];
+      let normalizedInsertIndex = Math.min(containerIndex, startColumn.length);
+      if (
+        normalizedInsertIndex === startColumn.length &&
+        normalizedInsertIndex > 0 &&
+        !startColumn[normalizedInsertIndex - 1].isFilled
+      ) {
+        normalizedInsertIndex -= 1;
+      }
+
+      const splitHtmlByDropRatio = (html: string, ratio: number): { beforeHtml: string; afterHtml: string } => {
+        const SNAP_TOP = 0.05;
+        const SNAP_BOTTOM = 0.95;
+        if (ratio <= SNAP_TOP) {
+          return { beforeHtml: '', afterHtml: html || '' };
+        }
+        if (ratio >= SNAP_BOTTOM) {
+          return { beforeHtml: html || '', afterHtml: '' };
+        }
+
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html || '', 'text/html');
+        const nodes = Array.from(doc.body.childNodes);
+        const serializeNode = (node: ChildNode): string => {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            return (node as Element).outerHTML;
+          }
+          if (node.nodeType === Node.TEXT_NODE) {
+            return node.textContent || '';
+          }
+          return '';
+        };
+        const blocks = nodes
+          .map(serializeNode)
+          .map(s => s.trim())
+          .filter(Boolean);
+
+        if (blocks.length <= 1) {
+          if (ratio < 0.5) {
+            return { beforeHtml: '', afterHtml: html || '' };
+          }
+          return { beforeHtml: html || '', afterHtml: '' };
+        }
+
+        const splitPointRaw = Math.round(blocks.length * ratio);
+        const splitPoint = Math.max(1, Math.min(blocks.length - 1, splitPointRaw));
+        return {
+          beforeHtml: blocks.slice(0, splitPoint).join(''),
+          afterHtml: blocks.slice(splitPoint).join(''),
+        };
+      };
+
+      if (
+        typeof dropRatio === 'number' &&
+        dropRatio >= 0 &&
+        dropRatio <= 1 &&
+        startColumn[normalizedInsertIndex] &&
+        startColumn[normalizedInsertIndex].isFilled &&
+        (startColumn[normalizedInsertIndex].kind || 'text') === 'text' &&
+        startColumn[normalizedInsertIndex].content
+      ) {
+        const target = startColumn[normalizedInsertIndex];
+        const { beforeHtml, afterHtml } = splitHtmlByDropRatio(target.content, dropRatio);
+        const items: FlowItem[] = [];
+        if (beforeHtml.trim()) {
+          items.push({ kind: 'text', articleId: target.articleId, html: beforeHtml, source: 'existing' });
+        }
+        items.push({ kind: 'illustration', illustrationId: illustration.id, span: 1, heightPx: INLINE_ILLUSTRATION_HEIGHT_PX, source: 'new' });
+        if (afterHtml.trim()) {
+          items.push({ kind: 'text', articleId: target.articleId, html: afterHtml, source: 'existing' });
+        }
+
+        startColumn.splice(normalizedInsertIndex, 1);
+
+        const next = { ...prev, [currentPage]: { ...basePageData, columns } };
+        return reflowFromPosition(
+          next,
+          currentPage,
+          columnIndex,
+          normalizedInsertIndex,
+          items,
+          undefined
+        );
+      }
+
+      const next = { ...prev, [currentPage]: { ...basePageData, columns } };
+      return reflowFromPosition(
+        next,
+        currentPage,
+        columnIndex,
+        normalizedInsertIndex,
+        [{ kind: 'illustration', illustrationId: illustration.id, span: 1, heightPx: INLINE_ILLUSTRATION_HEIGHT_PX, source: 'new' }],
+        undefined
+      );
+    });
+  }, [allIllustrations, buildEmptyColumns, currentPage, getTemplateForPage, initPageData, reflowFromPosition]);
+
+  const handleDeleteInlineIllustration = useCallback((columnIndex: number, containerIndex: number) => {
+    setPagesData(prev => {
+      const template = getTemplateForPage(currentPage);
+      const basePageData = prev[currentPage] || initPageData(currentPage, template);
+      const columns = (basePageData.columns && basePageData.columns.length > 0 ? basePageData.columns : buildEmptyColumns(template))
+        .map(col => col.map(cont => ({ ...cont })));
+
+      const col = columns[columnIndex] || [];
+      const target = col[containerIndex];
+      if (!target || !target.isFilled || target.kind !== 'illustration') return prev;
+
+      col.splice(containerIndex, 1);
+
+      const reflowStartIndex = Math.max(0, containerIndex - 1);
+
+      const next = { ...prev, [currentPage]: { ...basePageData, columns } };
+      return reflowFromPosition(next, currentPage, columnIndex, reflowStartIndex, [], undefined);
+    });
+  }, [buildEmptyColumns, currentPage, getTemplateForPage, initPageData, reflowFromPosition]);
 
   const handleDropIllustration = useCallback((illustrationId: string, columnIndex: number, positionIndex: number) => {
     const illustration = allIllustrations.find(ill => ill.id === illustrationId);
@@ -837,8 +1068,11 @@ const LayoutDesignerWorkspace: React.FC = () => {
                     pageNumber={currentPage}
                     columns={currentPageData.columns}
                     globalFirstOccurrenceByArticleId={globalFirstOccurrenceByArticleId}
+                    interactionDisabled={layoutsLoading || templatesLoading}
                     onDropArticle={handleDropArticle}
+                    onDropInlineIllustration={handleDropInlineIllustration}
                     onDeleteContainer={handleDeleteContainer}
+                    onDeleteInlineIllustration={handleDeleteInlineIllustration}
                     headerContent={currentPageData.headerContent}
                     onHeaderChange={handleHeaderChange}
                     illustrations={allIllustrations}

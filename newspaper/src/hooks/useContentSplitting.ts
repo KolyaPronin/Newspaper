@@ -1,17 +1,23 @@
 import { CHARS_PER_COLUMN, CHARS_PER_LINE, LINES_PER_COLUMN, getTextLength, getTextLines } from './contentMetrics';
-import { splitByParagraphs, splitByLines, splitBlocks } from './contentSplitHelpers';
+import { splitBlocks } from './contentSplitHelpers';
 
  const splitTextAtWordBoundary = (text: string, maxChars: number): { first: string; rest: string } => {
-   if (maxChars <= 0) return { first: '', rest: text };
-   if (text.length <= maxChars) return { first: text, rest: '' };
-   const slice = text.substring(0, maxChars);
-   const lastSpace = slice.lastIndexOf(' ');
-   const cut = lastSpace > Math.floor(maxChars * 0.6) ? lastSpace : maxChars;
-   return {
-     first: text.substring(0, cut).trimEnd(),
-     rest: text.substring(cut).trimStart(),
-   };
- };
+  if (maxChars <= 0) return { first: '', rest: text };
+  if (text.length <= maxChars) return { first: text, rest: '' };
+  const slice = text.substring(0, maxChars);
+  const lastSpace = slice.lastIndexOf(' ');
+  if (lastSpace === -1) {
+    return {
+      first: text.substring(0, maxChars).trimEnd(),
+      rest: text.substring(maxChars).trimStart(),
+    };
+  }
+  const cut = lastSpace > Math.floor(maxChars * 0.6) ? lastSpace : maxChars;
+  return {
+    first: text.substring(0, cut).trimEnd(),
+    rest: text.substring(cut).trimStart(),
+  };
+};
 
 // Экспортируем константы и функции
 export { CHARS_PER_COLUMN, LINES_PER_COLUMN, getTextLength, getTextLines } from './contentMetrics';
@@ -122,6 +128,7 @@ export const splitContentToFitWithRemaining = (
   maxChars: number = CHARS_PER_COLUMN,
   maxLines: number = LINES_PER_COLUMN
 ): { parts: string[]; remainingHtml: string; fillsContainer: boolean } => {
+  const MIN_SPLIT_CHARS = 4;
   const availableCharsRaw = maxChars - usedChars;
   const availableLines = maxLines - usedLines;
   const availableChars = Math.min(availableCharsRaw, availableLines * CHARS_PER_LINE);
@@ -162,6 +169,11 @@ export const splitContentToFitWithRemaining = (
         const tagName = doc.body.firstElementChild?.tagName.toLowerCase() || 'p';
         const { first, rest } = splitTextAtWordBoundary(text, allowedChars);
 
+        if (first.length > 0 && first.length < MIN_SPLIT_CHARS) {
+          const remainingHtml = blocks.slice(i).join('');
+          return { parts: [fittingPart], remainingHtml, fillsContainer: true };
+        }
+
         const firstHtml = first ? `<${tagName}>${first}</${tagName}>` : '';
         const restHtml = rest ? `<${tagName}>${rest}</${tagName}>` : '';
         const combined = fittingPart + firstHtml;
@@ -175,20 +187,28 @@ export const splitContentToFitWithRemaining = (
       return { parts: [fittingPart], remainingHtml, fillsContainer: fills };
     }
 
-    // Даже один блок не помещается: делим этот блок на 2 части (без троеточий, чтобы поток продолжался)
+    // Даже один блок не помещается.
+    // Если места слишком мало — переносим блок целиком (иначе получаются переносы типа "1 буква").
+    if (availableChars < MIN_SPLIT_CHARS) {
+      const remainingHtml = blocks.slice(i).join('');
+      return { parts: [], remainingHtml, fillsContainer: true };
+    }
+
     const parser = new DOMParser();
     const doc = parser.parseFromString(block, 'text/html');
     const text = doc.body.textContent || '';
     const tagName = doc.body.firstElementChild?.tagName.toLowerCase() || 'p';
-    const firstText = text.substring(0, Math.max(0, availableChars));
-    const restText = text.substring(Math.max(0, availableChars));
+    const { first, rest } = splitTextAtWordBoundary(text, availableChars);
 
-    const firstHtml = firstText ? `<${tagName}>${firstText}</${tagName}>` : '';
-    const restHtml = restText ? `<${tagName}>${restText}</${tagName}>` : '';
+    if (!first || first.length < MIN_SPLIT_CHARS) {
+      const remainingHtml = blocks.slice(i).join('');
+      return { parts: [], remainingHtml, fillsContainer: true };
+    }
+
+    const firstHtml = `<${tagName}>${first}</${tagName}>`;
+    const restHtml = rest ? `<${tagName}>${rest}</${tagName}>` : '';
     const remainingHtml = restHtml + blocks.slice(i + 1).join('');
-
-    const fills = true;
-    return { parts: firstHtml ? [firstHtml] : [], remainingHtml, fillsContainer: fills };
+    return { parts: [firstHtml], remainingHtml, fillsContainer: true };
   }
 
   // Весь контент поместился

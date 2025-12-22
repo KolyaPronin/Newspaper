@@ -7,8 +7,11 @@ export interface PageLayoutProps {
   pageNumber: number;
   columns: ColumnContainer[][];
   globalFirstOccurrenceByArticleId: Map<string, { pageNum: number; colIndex: number; containerIdx: number }>;
+  interactionDisabled?: boolean;
   onDropArticle: (articleId: string, columnIndex: number, containerIndex: number) => void;
+  onDropInlineIllustration?: (illustrationId: string, columnIndex: number, containerIndex: number, dropRatio?: number) => void;
   onDeleteContainer?: (columnIndex: number, containerIndex: number) => void;
+  onDeleteInlineIllustration?: (columnIndex: number, containerIndex: number) => void;
   headerContent: string;
   onHeaderChange: (content: string) => void;
   illustrations?: Illustration[];
@@ -22,8 +25,11 @@ const PageLayout: React.FC<PageLayoutProps> = ({
   pageNumber,
   columns, 
   globalFirstOccurrenceByArticleId,
+  interactionDisabled,
   onDropArticle, 
+  onDropInlineIllustration,
   onDeleteContainer, 
+  onDeleteInlineIllustration,
   headerContent, 
   onHeaderChange,
   illustrations = [],
@@ -46,11 +52,44 @@ const PageLayout: React.FC<PageLayoutProps> = ({
     return map;
   }, [columns]);
 
-  const handleDrop = (e: React.DragEvent, columnIndex: number, containerIndex: number) => {
+  const handleDrop = (
+    e: React.DragEvent,
+    columnIndex: number,
+    containerIndex: number,
+    dropTarget: 'zone' | 'container',
+    containerIsFilled?: boolean,
+    containerKind?: 'text' | 'illustration'
+  ) => {
+    if (interactionDisabled) return;
     e.preventDefault();
     const articleId = e.dataTransfer.getData('articleId');
     if (articleId) {
       onDropArticle(articleId, columnIndex, containerIndex);
+      return;
+    }
+
+    const illustrationId = e.dataTransfer.getData('illustrationId');
+    if (illustrationId && onDropInlineIllustration) {
+      let insertIndex = containerIndex;
+
+      if (dropTarget === 'container' && containerIsFilled && containerKind === 'text') {
+        const target = e.currentTarget as HTMLElement;
+        const rect = target.getBoundingClientRect();
+        const relativeY = e.clientY - rect.top;
+        const ratioRaw = rect.height > 0 ? (relativeY / rect.height) : 0.5;
+        const ratio = Math.max(0, Math.min(1, ratioRaw));
+        onDropInlineIllustration(illustrationId, columnIndex, containerIndex, ratio);
+        return;
+      }
+
+      if (dropTarget === 'container' && containerIsFilled && containerKind === 'illustration') {
+        const target = e.currentTarget as HTMLElement;
+        const rect = target.getBoundingClientRect();
+        const relativeY = e.clientY - rect.top;
+        const before = relativeY < rect.height / 2;
+        insertIndex = before ? containerIndex : (containerIndex + 1);
+      }
+      onDropInlineIllustration(illustrationId, columnIndex, insertIndex);
     }
   };
 
@@ -63,6 +102,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
   };
 
   const handleDragOver = (e: React.DragEvent) => {
+    if (interactionDisabled) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
   };
@@ -92,7 +132,8 @@ const PageLayout: React.FC<PageLayoutProps> = ({
       </div>
 
       <div className="page-content">
-        {columns.map((columnContainers, colIndex) => {
+        {Array.from({ length: template.columns }).map((_, colIndex) => {
+          const columnContainers = columns[colIndex] || [];
           const illustrationSlotsCount = template.illustrationPositions.filter(
             pos => pos.allowedColumns.includes(colIndex)
           ).length;
@@ -121,7 +162,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
                   {columnContainers.length === 0 ? (
                     <div
                       className="column-container empty"
-                      onDrop={(e) => handleDrop(e, colIndex, 0)}
+                      onDrop={(e) => handleDrop(e, colIndex, 0, 'zone')}
                       onDragOver={handleDragOver}
                     >
                       <div className="container-empty-text">
@@ -132,7 +173,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
                     <>
                       <div
                         className="container-drop-zone"
-                        onDrop={(e) => handleDrop(e, colIndex, 0)}
+                        onDrop={(e) => handleDrop(e, colIndex, 0, 'zone')}
                         onDragOver={handleDragOver}
                       />
                       {columnContainers.map((container, containerIdx) => {
@@ -140,6 +181,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
                         const isDeleteButtonAllowed = (() => {
                           if (!onDeleteContainer) return false;
                           if (!container.isFilled) return false;
+                          if (container.kind === 'illustration') return false;
                           if (!container.articleId) return true;
 
                           // Показываем ✕ только у "начала" статьи:
@@ -167,27 +209,79 @@ const PageLayout: React.FC<PageLayoutProps> = ({
                           <React.Fragment key={container.id}>
                             <div
                               className={`column-container ${container.isFilled ? 'filled' : 'empty'}`}
-                              onDrop={(e) => handleDrop(e, colIndex, containerIdx)}
+                              onDrop={(e) => handleDrop(
+                                e,
+                                colIndex,
+                                containerIdx,
+                                'container',
+                                container.isFilled,
+                                (container.kind || 'text')
+                              )}
                               onDragOver={handleDragOver}
                               style={{ marginBottom: isLast ? '0' : '8px' }}
                             >
                               {container.isFilled ? (
                                 <div className="container-content">
-                                  <div
-                                    className="article-content"
-                                    dangerouslySetInnerHTML={{ __html: container.content }}
-                                  />
-                                  {isDeleteButtonAllowed && (
-                                    <button
-                                      className="delete-container-btn"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        onDeleteContainer?.(colIndex, containerIdx);
-                                      }}
-                                      title="Удалить текст"
-                                    >
-                                      ✕
-                                    </button>
+                                  {container.kind === 'illustration' ? (
+                                    <>
+                                      {(() => {
+                                        const ill = illustrations.find(i => i.id === container.illustrationId);
+                                        if (!ill) {
+                                          return (
+                                            <div className="inline-illustration-placeholder">
+                                              Иллюстрация
+                                            </div>
+                                          );
+                                        }
+                                        return (
+                                          <div className="inline-illustration">
+                                            <img
+                                              src={ill.url}
+                                              alt={ill.caption || ''}
+                                              className="inline-illustration-image"
+                                              style={{ height: container.height || 120 }}
+                                            />
+                                            {ill.caption && (
+                                              <div className="inline-illustration-caption">
+                                                {ill.caption}
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })()}
+                                      {onDeleteInlineIllustration && (
+                                        <button
+                                          className="delete-container-btn"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            onDeleteInlineIllustration?.(colIndex, containerIdx);
+                                          }}
+                                          title="Удалить иллюстрацию"
+                                        >
+                                          ✕
+                                        </button>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div
+                                        className="article-content"
+                                        lang="ru"
+                                        dangerouslySetInnerHTML={{ __html: container.content }}
+                                      />
+                                      {isDeleteButtonAllowed && (
+                                        <button
+                                          className="delete-container-btn"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            onDeleteContainer?.(colIndex, containerIdx);
+                                          }}
+                                          title="Удалить текст"
+                                        >
+                                          ✕
+                                        </button>
+                                      )}
+                                    </>
                                   )}
                                 </div>
                               ) : (
@@ -199,7 +293,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
                             {!isLast && (
                               <div
                                 className="container-drop-zone"
-                                onDrop={(e) => handleDrop(e, colIndex, containerIdx + 1)}
+                                onDrop={(e) => handleDrop(e, colIndex, containerIdx + 1, 'zone')}
                                 onDragOver={handleDragOver}
                               />
                             )}
@@ -208,7 +302,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
                       })}
                       <div
                         className="container-drop-zone"
-                        onDrop={(e) => handleDrop(e, colIndex, columnContainers.length)}
+                        onDrop={(e) => handleDrop(e, colIndex, columnContainers.length, 'zone')}
                         onDragOver={handleDragOver}
                       />
                     </>

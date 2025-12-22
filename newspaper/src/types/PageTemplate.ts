@@ -50,6 +50,9 @@ export interface ColumnContainer {
   columnIndex: number;
   content: string; // HTML контент статьи
   articleId?: string;
+  kind?: 'text' | 'illustration';
+  illustrationId?: string;
+  span?: 1 | 2;
   height: number; // высота в пикселях
   isFilled: boolean;
 }

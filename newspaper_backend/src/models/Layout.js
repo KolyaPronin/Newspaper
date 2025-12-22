@@ -9,6 +9,26 @@ const columnContainerSchema = new mongoose.Schema({
     ref: 'Article',
     default: null,
   },
+  kind: {
+    type: String,
+    enum: ['text', 'illustration'],
+    default: 'text',
+  },
+  illustrationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Illustration',
+    default: null,
+  },
+  span: {
+    type: Number,
+    enum: [1, 2],
+    default: 1,
+  },
+  spanRole: {
+    type: String,
+    enum: ['main', 'ghost'],
+    default: null,
+  },
   height: { type: Number, default: 0 },
   isFilled: { type: Boolean, default: false },
 }, { _id: false });
@@ -58,6 +78,20 @@ const layoutSchema = new mongoose.Schema({
         required: true,
       },
       positionIndex: {
+        type: Number,
+        required: true,
+      },
+    }],
+    default: [],
+  },
+  ads: {
+    type: [{
+      illustrationId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Illustration',
+        required: true,
+      },
+      slotIndex: {
         type: Number,
         required: true,
       },

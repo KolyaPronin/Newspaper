@@ -72,6 +72,8 @@ const createLayout = async (req, res) => {
       headerContent: req.body.headerContent || template.headers?.content || '',
       footerContent: req.body.footerContent || template.footers?.content || '',
       columns: req.body.columns,
+      illustrations: req.body.illustrations || [],
+      ads: req.body.ads || [],
       status: req.body.status || 'draft',
       createdBy: req.user.id,
     });
@@ -105,6 +107,8 @@ const updateLayout = async (req, res) => {
     if (req.body.headerContent !== undefined) layout.headerContent = req.body.headerContent;
     if (req.body.footerContent !== undefined) layout.footerContent = req.body.footerContent;
     if (req.body.columns) layout.columns = req.body.columns;
+    if (req.body.illustrations !== undefined) layout.illustrations = req.body.illustrations;
+    if (req.body.ads !== undefined) layout.ads = req.body.ads;
     if (req.body.status) layout.status = req.body.status;
 
     await layout.save();

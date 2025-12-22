@@ -3,11 +3,50 @@ const Article = require('../models/Article');
 const path = require('path');
 const fs = require('fs');
 
+const getIllustrations = async (req, res) => {
+  try {
+    const { kind, global, articleId } = req.query;
+    const filter = {};
+
+    if (kind) {
+      filter.kind = kind;
+    }
+
+    if (global === 'true') {
+      filter.articleId = null;
+    }
+
+    if (articleId) {
+      filter.articleId = articleId;
+    }
+
+    const illustrations = await Illustration.find(filter)
+      .populate('articleId', 'title')
+      .populate('createdBy', 'username email')
+      .sort({ createdAt: -1 });
+
+    res.json({
+      success: true,
+      count: illustrations.length,
+      data: illustrations,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+};
+
 const getIllustrationsByArticle = async (req, res) => {
   try {
     const { articleId } = req.params;
+    const { kind } = req.query;
 
-    const illustrations = await Illustration.find({ articleId })
+    const filter = { articleId };
+    if (kind) filter.kind = kind;
+
+    const illustrations = await Illustration.find(filter)
       .populate('createdBy', 'username email')
       .sort({ createdAt: -1 });
 
@@ -58,37 +97,36 @@ const createIllustration = async (req, res) => {
       });
     }
 
-    const { articleId, caption, position, columnIndex } = req.body;
+    const { articleId, caption, position, columnIndex, kind } = req.body;
+    const resolvedKind = kind === 'ad' ? 'ad' : 'illustration';
 
-    if (!articleId) {
-      fs.unlinkSync(req.file.path);
-      return res.status(400).json({
-        success: false,
-        error: 'Article ID is required',
-      });
-    }
+    let resolvedArticleId = null;
+    if (articleId) {
+      const article = await Article.findById(articleId);
+      if (!article) {
+        fs.unlinkSync(req.file.path);
+        return res.status(404).json({
+          success: false,
+          error: 'Article not found',
+        });
+      }
 
-    const article = await Article.findById(articleId);
-    if (!article) {
-      fs.unlinkSync(req.file.path);
-      return res.status(404).json({
-        success: false,
-        error: 'Article not found',
-      });
-    }
+      if (resolvedKind === 'illustration' && article.status !== 'approved') {
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({
+          success: false,
+          error: 'Can only add illustrations to approved articles',
+        });
+      }
 
-    if (article.status !== 'approved') {
-      fs.unlinkSync(req.file.path);
-      return res.status(400).json({
-        success: false,
-        error: 'Can only add illustrations to approved articles',
-      });
+      resolvedArticleId = articleId;
     }
 
     const fileUrl = `/uploads/illustrations/${req.file.filename}`;
 
     const illustration = await Illustration.create({
-      articleId,
+      articleId: resolvedArticleId,
+      kind: resolvedKind,
       filename: req.file.filename,
       originalName: req.file.originalname,
       mimeType: req.file.mimetype,
@@ -202,6 +240,7 @@ const deleteIllustration = async (req, res) => {
 };
 
 module.exports = {
+  getIllustrations,
   getIllustrationsByArticle,
   getIllustrationById,
   createIllustration,

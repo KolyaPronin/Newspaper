@@ -4,7 +4,12 @@ const illustrationSchema = new mongoose.Schema({
   articleId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Article',
-    required: [true, 'Article ID is required'],
+    default: null,
+  },
+  kind: {
+    type: String,
+    enum: ['illustration', 'ad'],
+    default: 'illustration',
   },
   filename: {
     type: String,
@@ -53,6 +58,7 @@ const illustrationSchema = new mongoose.Schema({
 });
 
 illustrationSchema.index({ articleId: 1 });
+illustrationSchema.index({ kind: 1, articleId: 1 });
 illustrationSchema.index({ createdBy: 1 });
 
 const Illustration = mongoose.model('Illustration', illustrationSchema);

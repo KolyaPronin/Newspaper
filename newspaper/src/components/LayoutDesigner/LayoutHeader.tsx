@@ -6,9 +6,15 @@ interface LayoutHeaderProps {
   templates: PageTemplate[];
   templatesLoading: boolean;
   layoutsLoading: boolean;
+  currentPage: number;
+  inlineIllustrationSpan: 1 | 2;
+  bulkActionLoading?: boolean;
   onTemplateChange: (templateId: string) => void;
   onReloadTemplate: () => void;
   onRefreshTemplates: () => void;
+  onClearCurrentPage: () => void;
+  onClearAllPages: () => void;
+  onInlineIllustrationSpanChange: (span: 1 | 2) => void;
   autoSaveMessage: string | null;
 }
 
@@ -17,11 +23,18 @@ const LayoutHeader: React.FC<LayoutHeaderProps> = ({
   templates,
   templatesLoading,
   layoutsLoading,
+  currentPage,
+  inlineIllustrationSpan,
+  bulkActionLoading,
   onTemplateChange,
   onReloadTemplate,
   onRefreshTemplates,
+  onClearCurrentPage,
+  onClearAllPages,
+  onInlineIllustrationSpanChange,
   autoSaveMessage,
 }) => {
+  const actionsDisabled = templatesLoading || layoutsLoading || !!bulkActionLoading;
   return (
     <>
       <div className="workspace-header">
@@ -36,20 +49,48 @@ const LayoutHeader: React.FC<LayoutHeaderProps> = ({
               className="template-select"
               value={selectedTemplate?.id || ''}
               onChange={(e) => onTemplateChange(e.target.value)}
-              disabled={templatesLoading || templates.length === 0}
+              disabled={actionsDisabled || templates.length === 0}
             >
               {templates.map(t => (
                 <option key={t.id} value={t.id}>{t.name}</option>
               ))}
             </select>
           </label>
+          <label className="template-select-label">
+            Inline-иллюстрация
+            <select
+              className="template-select"
+              value={String(inlineIllustrationSpan)}
+              onChange={(e) => onInlineIllustrationSpanChange((e.target.value === '2' ? 2 : 1))}
+              disabled={actionsDisabled}
+            >
+              <option value="1">1 колонка</option>
+              <option value="2">2 колонки</option>
+            </select>
+          </label>
           <button 
             type="button" 
             className="btn btn-auto" 
             onClick={onReloadTemplate} 
-            disabled={!selectedTemplate || layoutsLoading}
+            disabled={!selectedTemplate || actionsDisabled}
           >
             {layoutsLoading ? 'Загрузка...' : 'Загрузить шаблон'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-auto"
+            onClick={onClearCurrentPage}
+            disabled={actionsDisabled}
+          >
+            Очистить страницу {currentPage}
+          </button>
+          <button
+            type="button"
+            className="btn btn-auto"
+            onClick={onClearAllPages}
+            disabled={actionsDisabled}
+          >
+            Очистить выпуск
           </button>
         </div>
       </div>
@@ -60,7 +101,7 @@ const LayoutHeader: React.FC<LayoutHeaderProps> = ({
           type="button" 
           className="btn btn-small" 
           onClick={onRefreshTemplates} 
-          disabled={templatesLoading}
+          disabled={actionsDisabled}
         >
           {templatesLoading ? 'Обновляю...' : 'Обновить'}
         </button>

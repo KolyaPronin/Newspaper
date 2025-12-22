@@ -4,6 +4,7 @@ const checkDatabase = require('../middleware/checkDatabase');
 const { authenticate } = require('../middleware/authMiddleware');
 const upload = require('../middleware/upload');
 const {
+  getIllustrations,
   getIllustrationsByArticle,
   getIllustrationById,
   createIllustration,
@@ -14,11 +15,15 @@ const {
 router.use(checkDatabase);
 router.use(authenticate);
 
+router.get('/', getIllustrations);
+router.get('', getIllustrations);
+
 router.get('/article/:articleId', getIllustrationsByArticle);
 
 router.get('/:id', getIllustrationById);
 
 router.post('/', upload.single('image'), createIllustration);
+router.post('', upload.single('image'), createIllustration);
 
 router.put('/:id', updateIllustration);
 

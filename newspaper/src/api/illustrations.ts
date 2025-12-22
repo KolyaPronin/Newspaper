@@ -1,8 +1,11 @@
 import { fetchAPI, API_BASE_URL } from './client';
 
+export type IllustrationKind = 'illustration' | 'ad';
+
 export interface Illustration {
   id: string;
-  articleId: string;
+  articleId: string | null;
+  kind: IllustrationKind;
   filename: string;
   originalName: string;
   mimeType: string;
@@ -22,7 +25,8 @@ export interface Illustration {
 
 export interface IllustrationFromAPI {
   _id: string;
-  articleId: string | { _id: string; title?: string };
+  articleId: string | { _id: string; title?: string } | null;
+  kind?: IllustrationKind;
   filename: string;
   originalName: string;
   mimeType: string;
@@ -37,11 +41,18 @@ export interface IllustrationFromAPI {
 }
 
 export const transformIllustration = (apiIllustration: IllustrationFromAPI): Illustration => {
+  const articleId = apiIllustration.articleId
+    ? (typeof apiIllustration.articleId === 'string'
+        ? apiIllustration.articleId
+        : apiIllustration.articleId._id)
+    : null;
+
+  const kind: IllustrationKind = apiIllustration.kind === 'ad' ? 'ad' : 'illustration';
+
   return {
     id: apiIllustration._id,
-    articleId: typeof apiIllustration.articleId === 'string'
-      ? apiIllustration.articleId
-      : apiIllustration.articleId._id,
+    articleId,
+    kind,
     filename: apiIllustration.filename,
     originalName: apiIllustration.originalName,
     mimeType: apiIllustration.mimeType,
@@ -65,6 +76,22 @@ export const transformIllustration = (apiIllustration: IllustrationFromAPI): Ill
 };
 
 export const illustrationAPI = {
+  getAll: async (params?: { kind?: IllustrationKind; global?: boolean; articleId?: string }): Promise<Illustration[]> => {
+    const query = new URLSearchParams();
+    if (params?.kind) query.append('kind', params.kind);
+    if (params?.global) query.append('global', 'true');
+    if (params?.articleId) query.append('articleId', params.articleId);
+    const endpoint = `/illustrations${query.toString() ? `?${query.toString()}` : ''}`;
+
+    const response = await fetchAPI<IllustrationFromAPI[]>(endpoint);
+    if (response.success && response.data) {
+      return Array.isArray(response.data)
+        ? response.data.map(transformIllustration)
+        : [];
+    }
+    throw new Error(response.error || 'Failed to fetch illustrations');
+  },
+
   getByArticle: async (articleId: string): Promise<Illustration[]> => {
     const response = await fetchAPI<IllustrationFromAPI[]>(`/illustrations/article/${articleId}`);
     if (response.success && response.data) {
@@ -84,16 +111,22 @@ export const illustrationAPI = {
   },
 
   upload: async (
-    articleId: string,
-    file: File | Blob,
-    options?: { caption?: string; position?: 'inline' | 'fixed'; columnIndex?: number }
+    payload: {
+      file: File | Blob;
+      articleId?: string | null;
+      kind?: IllustrationKind;
+      caption?: string;
+      position?: 'inline' | 'fixed';
+      columnIndex?: number;
+    }
   ): Promise<Illustration> => {
     const formData = new FormData();
-    formData.append('image', file);
-    formData.append('articleId', articleId);
-    if (options?.caption) formData.append('caption', options.caption);
-    if (options?.position) formData.append('position', options.position);
-    if (options?.columnIndex !== undefined) formData.append('columnIndex', options.columnIndex.toString());
+    formData.append('image', payload.file);
+    if (payload.articleId) formData.append('articleId', payload.articleId);
+    if (payload.kind) formData.append('kind', payload.kind);
+    if (payload.caption) formData.append('caption', payload.caption);
+    if (payload.position) formData.append('position', payload.position);
+    if (payload.columnIndex !== undefined) formData.append('columnIndex', payload.columnIndex.toString());
 
     // Используем общий fetchAPI, чтобы автоматически подставлялся Authorization
     const response = await fetchAPI<IllustrationFromAPI>('/illustrations', {

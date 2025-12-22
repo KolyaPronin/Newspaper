@@ -1,5 +1,5 @@
 import { fetchAPI } from './client';
-import { PageTemplate, ColumnContainer, Layout, LayoutIllustration } from '../types/PageTemplate';
+import { PageTemplate, ColumnContainer, Layout, LayoutIllustration, LayoutAd } from '../types/PageTemplate';
 
 export interface TemplateFromAPI extends Omit<PageTemplate, 'id'> {
   _id: string;
@@ -18,6 +18,10 @@ export interface LayoutFromAPI {
     illustrationId: string;
     columnIndex: number;
     positionIndex: number;
+  }>;
+  ads?: Array<{
+    illustrationId: string;
+    slotIndex: number;
   }>;
   status: 'draft' | 'in_review' | 'published';
   createdAt: string;
@@ -46,6 +50,7 @@ const transformLayout = (layout: LayoutFromAPI): Layout => ({
   footerContent: layout.footerContent,
   columns: layout.columns || [],
   illustrations: layout.illustrations || [],
+  ads: layout.ads || [],
   status: layout.status,
   createdAt: layout.createdAt,
   updatedAt: layout.updatedAt,
@@ -98,6 +103,7 @@ export const layoutAPI = {
     issueId?: string;
     pageNumber?: number;
     illustrations?: LayoutIllustration[];
+    ads?: LayoutAd[];
     status?: Layout['status'];
   }): Promise<Layout> => {
     const response = await fetchAPI<LayoutFromAPI>('/layouts', {
@@ -118,6 +124,7 @@ export const layoutAPI = {
     issueId?: string;
     pageNumber?: number;
     illustrations?: LayoutIllustration[];
+    ads?: LayoutAd[];
     status?: Layout['status'];
   }>): Promise<Layout> => {
     const response = await fetchAPI<LayoutFromAPI>(`/layouts/${id}`, {

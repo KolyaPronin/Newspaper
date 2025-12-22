@@ -53,6 +53,7 @@ export interface ColumnContainer {
   kind?: 'text' | 'illustration';
   illustrationId?: string;
   span?: 1 | 2;
+  spanRole?: 'main' | 'ghost';
   height: number; // высота в пикселях
   isFilled: boolean;
 }
@@ -61,6 +62,11 @@ export interface LayoutIllustration {
   illustrationId: string;
   columnIndex: number;
   positionIndex: number; // индекс позиции в illustrationPositions
+}
+
+export interface LayoutAd {
+  illustrationId: string;
+  slotIndex: number;
 }
 
 export interface Layout {
@@ -73,6 +79,7 @@ export interface Layout {
   footerContent?: string;
   columns: ColumnContainer[][];
   illustrations?: LayoutIllustration[]; // привязка иллюстраций к слотам
+  ads?: LayoutAd[];
   status: 'draft' | 'in_review' | 'published';
   updatedAt: string;
   createdAt: string;

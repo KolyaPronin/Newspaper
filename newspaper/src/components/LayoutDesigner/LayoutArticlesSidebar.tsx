@@ -5,15 +5,19 @@ import { Illustration } from '../../utils/api';
 interface LayoutArticlesSidebarProps {
   approvedArticles: Article[];
   allIllustrations: Illustration[];
+  allAds: Illustration[];
   onArticleDragStart: (e: React.DragEvent, articleId: string) => void;
   onIllustrationDragStart: (e: React.DragEvent, illustrationId: string) => void;
+  onAdDragStart: (e: React.DragEvent, illustrationId: string) => void;
 }
 
 const LayoutArticlesSidebar: React.FC<LayoutArticlesSidebarProps> = ({
   approvedArticles,
   allIllustrations,
+  allAds,
   onArticleDragStart,
   onIllustrationDragStart,
+  onAdDragStart,
 }) => {
   return (
     <div className="layout-articles-sidebar">
@@ -50,6 +54,35 @@ const LayoutArticlesSidebar: React.FC<LayoutArticlesSidebarProps> = ({
                 className="illustration-item"
                 draggable
                 onDragStart={(e) => onIllustrationDragStart(e, ill.id)}
+              >
+                <img
+                  src={ill.url}
+                  alt={ill.caption || ''}
+                  className="illustration-image"
+                />
+                {ill.caption && (
+                  <div className="illustration-caption">
+                    {ill.caption}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="illustrations-section">
+        <h3 className="illustrations-section-title">Реклама</h3>
+        {allAds.length === 0 ? (
+          <p className="article-empty">Нет доступной рекламы</p>
+        ) : (
+          <div className="illustrations-grid">
+            {allAds.map(ill => (
+              <div
+                key={ill.id}
+                className="illustration-item"
+                draggable
+                onDragStart={(e) => onAdDragStart(e, ill.id)}
               >
                 <img
                   src={ill.url}

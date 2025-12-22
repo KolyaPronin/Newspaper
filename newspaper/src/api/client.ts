@@ -1,4 +1,9 @@
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+const RAW_API_BASE_URL = process.env.REACT_APP_API_URL;
+const API_BASE_URL = RAW_API_BASE_URL
+  ? (RAW_API_BASE_URL.endsWith('/api')
+      ? RAW_API_BASE_URL
+      : `${RAW_API_BASE_URL.replace(/\/$/, '')}/api`)
+  : 'http://localhost:3001/api';
 let authToken: string | null = null;
 
 export const setAuthToken = (token: string | null) => {
@@ -57,7 +62,18 @@ export async function fetchAPI<T>(
       headers,
     });
 
-    const data = await response.json();
+    const rawText = await response.text();
+
+    let data: any = null;
+    try {
+      data = rawText ? JSON.parse(rawText) : null;
+    } catch (parseError) {
+      const snippet = rawText ? rawText.slice(0, 200) : '';
+      return {
+        success: false,
+        error: `Invalid JSON response (status ${response.status}). ${snippet}`,
+      };
+    }
 
     if (!response.ok) {
       return {

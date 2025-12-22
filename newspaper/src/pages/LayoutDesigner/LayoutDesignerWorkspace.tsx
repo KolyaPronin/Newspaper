@@ -1,48 +1,49 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useRef } from 'react';
 import { useArticles } from '../../contexts/ArticleContext';
-import { PageTemplate, ColumnContainer, Layout, LayoutIllustration } from '../../types/PageTemplate';
+import { PageTemplate, ColumnContainer } from '../../types/PageTemplate';
 import { defaultPageTemplate, coverPageTemplate, TOTAL_PAGES } from '../../data/templates';
 import PageLayout from './PageLayout';
 import CoverPage from './CoverPage';
 import LayoutHeader from '../../components/LayoutDesigner/LayoutHeader';
 import LayoutArticlesSidebar from '../../components/LayoutDesigner/LayoutArticlesSidebar';
 import PageNavigation from '../../components/LayoutDesigner/PageNavigation';
-import { layoutAPI, templateAPI, illustrationAPI, Illustration } from '../../utils/api';
-import { CHARS_PER_COLUMN, LINES_PER_COLUMN, getTextLength, getTextLines, splitContentToFitWithRemaining } from '../../hooks/useContentSplitting';
-
-interface PageData {
-  columns: ColumnContainer[][];
-  headerContent: string;
-  layoutTitle: string;
-  layoutId: string | null;
-  layoutIllustrations: LayoutIllustration[];
-}
-
-type FlowItem =
-  | { kind: 'text'; articleId?: string; html: string; source: 'existing' | 'new' }
-  | { kind: 'illustration'; illustrationId: string; span?: 1 | 2; heightPx: number; source: 'existing' | 'new' };
+import { PageData, FlowItem } from './workspace/types';
+import { buildEmptyColumns as buildEmptyColumnsPure, initPageData as initPageDataPure } from './workspace/columns';
+import { buildArticleTextIndex, inferArticleIdFromHtml as inferArticleIdFromHtmlPure } from './workspace/text';
+import { reflowFromPosition as reflowFromPositionPure } from './workspace/reflow/reflowFromPosition';
+import { useIllustrationsAssets } from './workspace/useIllustrationsAssets';
+import { useTemplatesAndLayouts } from './workspace/useTemplatesAndLayouts';
+import { useLayoutAutoSave } from './workspace/useLayoutAutoSave';
+import { useLayoutDesignerBulkActions } from './workspace/useLayoutDesignerBulkActions';
+import { useLayoutDesignerSlotActions } from './workspace/useLayoutDesignerSlotActions';
+import { useLayoutDesignerDragStart } from './workspace/useLayoutDesignerDragStart';
+import { useLayoutDesignerColumnActions } from './workspace/useLayoutDesignerColumnActions';
+import { useGlobalFirstOccurrenceByArticleId } from './workspace/useGlobalFirstOccurrence';
 
 const LayoutDesignerWorkspace: React.FC = () => {
   const { articles } = useArticles();
-  const [templates, setTemplates] = useState<PageTemplate[]>([]);
-  const [selectedTemplate, setSelectedTemplate] = useState<PageTemplate | null>(null);
   const [currentPage, setCurrentPage] = useState<number>(1);
-  const [newspaperTitle, setNewspaperTitle] = useState<string>('Название газеты');
+  const [newspaperTitle, setNewspaperTitle] = useState<string>('XPress');
+  const [inlineIllustrationSpan, setInlineIllustrationSpan] = useState<1 | 2>(1);
   
   // Данные для всех страниц
   const [pagesData, setPagesData] = useState<Record<number, PageData>>({});
   
-  const [templatesLoading, setTemplatesLoading] = useState<boolean>(false);
-  const [templatesError, setTemplatesError] = useState<string | null>(null);
-  const [layoutsLoading, setLayoutsLoading] = useState<boolean>(false);
   const [autoSaveMessage, setAutoSaveMessage] = useState<string | null>('Нет изменений');
   const [saveError, setSaveError] = useState<string | null>(null);
-  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const skipAutoSaveRef = useRef<boolean>(false);
-  const [articleIllustrations, setArticleIllustrations] = useState<Record<string, Illustration[]>>({});
-  const [allIllustrations, setAllIllustrations] = useState<Illustration[]>([]);
 
-  // Получить шаблон для текущей страницы
+  const buildEmptyColumns = useCallback((template: PageTemplate): ColumnContainer[][] => {
+    return buildEmptyColumnsPure(template);
+  }, []);
+
+  const { templates, selectedTemplate, templatesLoading, templatesError, layoutsLoading, fetchTemplates, handleTemplateChange, handleReloadTemplate } = useTemplatesAndLayouts({
+    buildEmptyColumns,
+    setPagesData,
+    setAutoSaveMessage,
+    setSaveError,
+  });
+
   const getTemplateForPage = useCallback((pageNumber: number): PageTemplate => {
     if (pageNumber === 1) {
       return coverPageTemplate;
@@ -58,558 +59,64 @@ const LayoutDesignerWorkspace: React.FC = () => {
       layoutTitle: currentPage === 1 ? 'Обложка' : `Страница ${currentPage}`,
       layoutId: null,
       layoutIllustrations: [],
+      layoutAds: [],
     };
   }, [pagesData, currentPage]);
 
-  const globalFirstOccurrenceByArticleId = useMemo(() => {
-    const map = new Map<string, { pageNum: number; colIndex: number; containerIdx: number }>();
-
-    // Считаем по всем страницам макета (кроме обложки)
-    for (let pageNum = 2; pageNum <= TOTAL_PAGES; pageNum++) {
-      const template = getTemplateForPage(pageNum);
-      const page = pagesData[pageNum];
-      const cols = page?.columns || [];
-
-      for (let colIndex = 0; colIndex < template.columns; colIndex++) {
-        const column = cols[colIndex] || [];
-        for (let containerIdx = 0; containerIdx < column.length; containerIdx++) {
-          const c = column[containerIdx];
-          if (!c || !c.isFilled || !c.articleId) continue;
-          if (!map.has(c.articleId)) {
-            map.set(c.articleId, { pageNum, colIndex, containerIdx });
-          }
-        }
-      }
-    }
-
-    return map;
-  }, [getTemplateForPage, pagesData]);
-
-  const buildEmptyColumns = useCallback((template: PageTemplate): ColumnContainer[][] => {
-    const initialColumns: ColumnContainer[][] = [];
-    for (let i = 0; i < template.columns; i++) {
-      initialColumns.push([
-        {
-          id: `col_${i}_container_0`,
-          columnIndex: i,
-          content: '',
-          height: 0,
-          isFilled: false,
-        },
-      ]);
-    }
-    return initialColumns;
-  }, []);
-
-  const getPlainText = useCallback((html: string): string => {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-    return (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
-  }, []);
+  const globalFirstOccurrenceByArticleId = useGlobalFirstOccurrenceByArticleId(getTemplateForPage, pagesData);
 
   const articleTextIndex = useMemo(() => {
-    const map = new Map<string, string>();
-    for (let i = 0; i < articles.length; i++) {
-      const a = articles[i];
-      if (!map.has(a.id)) {
-        map.set(a.id, getPlainText(a.content));
-      }
-    }
-    return map;
-  }, [articles, getPlainText]);
-
-  const inferArticleIdFromHtml = useCallback((html: string): string | undefined => {
-    const text = getPlainText(html);
-    if (!text) return undefined;
-    const probe = text.slice(0, Math.min(80, text.length));
-    if (probe.length < 30) return undefined;
-
-    const entries = Array.from(articleTextIndex.entries());
-    for (let i = 0; i < entries.length; i++) {
-      const id = entries[i][0];
-      const fullText = entries[i][1];
-      if (fullText.includes(probe)) return id;
-    }
-    return undefined;
-  }, [articleTextIndex, getPlainText]);
-
-  const initPageData = useCallback((pageNum: number, template: PageTemplate): PageData => {
-    return {
-      columns: buildEmptyColumns(template),
-      headerContent: pageNum === 1 ? '' : (template.headers?.content || 'Заголовок газеты'),
-      layoutTitle: pageNum === 1 ? 'Обложка' : `Страница ${pageNum}`,
-      layoutId: null,
-      layoutIllustrations: [],
-    };
-  }, [buildEmptyColumns]);
-
-  const collectTailFromColumns = useCallback((
-    columns: ColumnContainer[][],
-    templateColumnsCount: number,
-    startColIndex: number,
-    startContainerIndex: number,
-    into: FlowItem[],
-    skipArticleId?: string
-  ) => {
-    const pushMergedExisting = (item: FlowItem) => {
-      const last = into.length > 0 ? into[into.length - 1] : undefined;
-      if (
-        last &&
-        last.kind === 'text' &&
-        item.kind === 'text' &&
-        last.source === 'existing' &&
-        item.source === 'existing' &&
-        last.articleId &&
-        item.articleId &&
-        last.articleId === item.articleId
-      ) {
-        last.html += item.html;
-        return;
-      }
-      into.push(item);
-    };
-
-    for (let colIdx = startColIndex; colIdx < templateColumnsCount; colIdx++) {
-      const column = columns[colIdx];
-      if (!column) continue;
-      const startIdx = colIdx === startColIndex ? Math.min(startContainerIndex, column.length) : 0;
-      const removed = column.splice(startIdx);
-      removed.forEach(cont => {
-        if (cont.isFilled && cont.content) {
-          const resolvedArticleId = cont.articleId || inferArticleIdFromHtml(cont.content);
-          if (skipArticleId && resolvedArticleId === skipArticleId) return;
-          pushMergedExisting({ kind: 'text', articleId: resolvedArticleId, html: cont.content, source: 'existing' });
-        } else if (cont.isFilled && cont.kind === 'illustration' && cont.illustrationId) {
-          pushMergedExisting({
-            kind: 'illustration',
-            illustrationId: cont.illustrationId,
-            span: cont.span,
-            heightPx: cont.height && cont.height > 0 ? cont.height : 120,
-            source: 'existing',
-          });
-        }
-      });
-    }
-  }, [inferArticleIdFromHtml]);
-
-  function packFlowIntoPageColumns(
-    flow: FlowItem[],
-    columns: ColumnContainer[][],
-    template: PageTemplate,
-    startColIndex: number
-  ) {
-    const getExtraOverheadLinesForNewFilledContainer = (existingColumn: ColumnContainer[]): number => {
-      const approxLineHeightPx = 18;
-      const dropZoneHeightPx = 10;
-      const containerGapPx = existingColumn.length > 0 ? 8 : 0;
-      const filledContainerPaddingPx = 16;
-      const deltaPx = dropZoneHeightPx + containerGapPx + filledContainerPaddingPx;
-      return Math.ceil(deltaPx / approxLineHeightPx);
-    };
-
-    for (let colIdx = startColIndex; colIdx < template.columns && flow.length > 0; colIdx++) {
-      const column = columns[colIdx] || [];
-      columns[colIdx] = column;
-
-      for (let i = column.length - 1; i >= 0; i--) {
-        if (!column[i].isFilled) {
-          column.splice(i, 1);
-        }
-      }
-
-      const { maxLines: baseMaxLines } = getColumnCapacity(template, colIdx);
-      let used = getColumnUsedSpace(column);
-
-      while (flow.length > 0) {
-        const current = flow[0];
-        const newContainerOverheadLines = getExtraOverheadLinesForNewFilledContainer(column);
-
-        const INLINE_SAFETY_LINES = 8;
-        const columnHasInlineIllustration = column.some(c => c.isFilled && c.kind === 'illustration');
-        const columnHasText = column.some(c => c.isFilled && (c.kind || 'text') === 'text');
-        const willPlaceIllustrationNow = current.kind === 'illustration';
-
-        // Safety нужен в основном когда в колонке смешиваются текст и inline-иллюстрации
-        // (иначе возможен визуальный клип/налезание из-за неточностей метрик).
-        // Для колонки, состоящей только из иллюстраций, быть слишком консервативными не нужно.
-        const shouldApplyInlineSafety =
-          (columnHasInlineIllustration || willPlaceIllustrationNow) && (columnHasText || current.kind === 'text');
-        const effectiveMaxLines = Math.max(
-          1,
-          baseMaxLines - (shouldApplyInlineSafety ? INLINE_SAFETY_LINES : 0)
-        );
-        const effectiveMaxChars = Math.max(
-          1,
-          Math.floor(CHARS_PER_COLUMN * (effectiveMaxLines / LINES_PER_COLUMN))
-        );
-
-        if (current.kind === 'illustration') {
-          const approxLineHeightPx = 18;
-          const inlineIllustrationExtraPx = 60;
-          const needLines = Math.ceil((current.heightPx + inlineIllustrationExtraPx) / approxLineHeightPx);
-          const remainingLines = Math.max(0, effectiveMaxLines - used.lines);
-          if (needLines + newContainerOverheadLines > remainingLines) {
-            break;
-          }
-
-          const illContainer: ColumnContainer = {
-            id: `col_${colIdx}_illus_${Date.now()}_${Math.random()}`,
-            columnIndex: colIdx,
-            content: '',
-            height: current.heightPx,
-            isFilled: true,
-            kind: 'illustration',
-            illustrationId: current.illustrationId,
-            span: current.span,
-          };
-          column.push(illContainer);
-          used = getColumnUsedSpace(column);
-          flow.shift();
-          continue;
-        }
-
-        const { parts, remainingHtml } = splitContentToFitWithRemaining(
-          current.html,
-          used.chars,
-          used.lines + newContainerOverheadLines,
-          effectiveMaxChars,
-          effectiveMaxLines
-        );
-
-        if (parts.length === 0) {
-          break;
-        }
-
-        const filled: ColumnContainer = {
-          id: `col_${colIdx}_container_${Date.now()}_${Math.random()}`,
-          columnIndex: colIdx,
-          content: parts[0],
-          height: 0,
-          isFilled: true,
-          articleId: current.articleId,
-          kind: 'text',
-        };
-        column.push(filled);
-
-        used = getColumnUsedSpace(column);
-
-        if (remainingHtml) {
-          current.html = remainingHtml;
-          break;
-        }
-
-        flow.shift();
-      }
-
-      if (flow.length === 0) {
-        const INLINE_SAFETY_LINES = 3;
-        const columnHasInlineIllustration = column.some(c => c.isFilled && c.kind === 'illustration');
-        const effectiveMaxLines = Math.max(
-          1,
-          baseMaxLines - (columnHasInlineIllustration ? INLINE_SAFETY_LINES : 0)
-        );
-        const remainingLines = Math.max(0, effectiveMaxLines - used.lines);
-        ensureEmptyContainerAtEnd(column, colIdx, remainingLines);
-      }
-    }
-  }
-
-  function reflowFromPosition(
-    prev: Record<number, PageData>,
-    startPage: number,
-    startColIndex: number,
-    startContainerIndex: number,
-    prepend: FlowItem[],
-    skipArticleId?: string
-  ): Record<number, PageData> {
-    const updated = { ...prev };
-    const flow: FlowItem[] = [];
-
-    for (let pageNum = startPage; pageNum <= TOTAL_PAGES; pageNum++) {
-      const template = getTemplateForPage(pageNum);
-      const basePageData = updated[pageNum] || initPageData(pageNum, template);
-      const pageColumns = (basePageData.columns && basePageData.columns.length > 0 ? basePageData.columns : buildEmptyColumns(template))
-        .map(col => col.map(cont => ({ ...cont })));
-
-      if (pageNum === startPage) {
-        collectTailFromColumns(pageColumns, template.columns, startColIndex, startContainerIndex, flow, skipArticleId);
-      } else {
-        collectTailFromColumns(pageColumns, template.columns, 0, 0, flow, skipArticleId);
-      }
-
-      updated[pageNum] = { ...basePageData, columns: pageColumns };
-    }
-
-    if (prepend.length > 0) {
-      flow.unshift(...prepend);
-    }
-
-    for (let i = 0; i < flow.length - 1;) {
-      const a = flow[i];
-      const b = flow[i + 1];
-      if (
-        a.kind === 'text' &&
-        b.kind === 'text' &&
-        a.articleId &&
-        b.articleId &&
-        a.articleId === b.articleId
-      ) {
-        a.html += b.html;
-        flow.splice(i + 1, 1);
-        continue;
-      }
-      i += 1;
-    }
-
-    for (let pageNum = startPage; pageNum <= TOTAL_PAGES; pageNum++) {
-      const template = getTemplateForPage(pageNum);
-      const basePageData = updated[pageNum] || initPageData(pageNum, template);
-      const pageColumns = (basePageData.columns && basePageData.columns.length > 0 ? basePageData.columns : buildEmptyColumns(template));
-      packFlowIntoPageColumns(flow, pageColumns, template, pageNum === startPage ? startColIndex : 0);
-      updated[pageNum] = { ...basePageData, columns: pageColumns };
-    }
-
-    return updated;
-  }
-
-  const resetPageData = useCallback((pageNumber: number, template: PageTemplate) => {
-    const newPagesData = { ...pagesData };
-    newPagesData[pageNumber] = {
-      columns: buildEmptyColumns(template),
-      headerContent: pageNumber === 1 ? '' : (template.headers?.content || 'Заголовок газеты'),
-      layoutTitle: pageNumber === 1 ? 'Обложка' : `${template.name} макет`,
-      layoutId: null,
-      layoutIllustrations: [],
-    };
-    setPagesData(newPagesData);
-  }, [pagesData, buildEmptyColumns]);
-
-  const applyLayoutToPage = useCallback((pageNumber: number, layout: Layout, fallbackTemplate?: PageTemplate | null) => {
-    const newPagesData = { ...pagesData };
-    newPagesData[pageNumber] = {
-      columns: layout.columns || [],
-      headerContent: layout.headerContent || (pageNumber === 1 ? '' : (fallbackTemplate?.headers?.content || 'Заголовок газеты')),
-      layoutTitle: layout.title,
-      layoutId: layout.id,
-      layoutIllustrations: layout.illustrations || [],
-    };
-    setPagesData(newPagesData);
-  }, [pagesData]);
+    return buildArticleTextIndex(articles);
+  }, [articles]);
 
   const approvedArticles = useMemo(
     () => articles.filter(a => a.status === 'approved'),
     [articles]
   );
 
-  useEffect(() => {
-    const loadIllustrations = async () => {
-      const illustrationsMap: Record<string, Illustration[]> = {};
-      const allIlls: Illustration[] = [];
-      
-      for (const article of approvedArticles) {
-        try {
-          const illustrations = await illustrationAPI.getByArticle(article.id);
-          illustrationsMap[article.id] = illustrations;
-          allIlls.push(...illustrations);
-        } catch (error) {
-          illustrationsMap[article.id] = [];
-        }
-      }
-      
-      setArticleIllustrations(illustrationsMap);
-      setAllIllustrations(allIlls);
-    };
+  const { allIllustrations, allAds } = useIllustrationsAssets(approvedArticles);
 
-    if (approvedArticles.length > 0) {
-      loadIllustrations();
-    } else {
-      setAllIllustrations([]);
-      setArticleIllustrations({});
-    }
-  }, [approvedArticles]);
+  const inferArticleIdFromHtml = useCallback((html: string): string | undefined => {
+    return inferArticleIdFromHtmlPure(html, articleTextIndex);
+  }, [articleTextIndex]);
 
-  const loadLayoutsForAllPages = useCallback(async (template: PageTemplate) => {
-    setLayoutsLoading(true);
-    setSaveError(null);
-    try {
-      // Загружаем все макеты для всех страниц (и для обложки, и для обычных страниц)
-      const [coverLayouts, regularLayouts] = await Promise.all([
-        // Для обложки ищем макеты только по номеру страницы, без templateId,
-        // чтобы не передавать несуществующий ObjectId
-        layoutAPI.getLayouts({ pageNumber: 1 }),
-        layoutAPI.getLayouts({ templateId: template.id }),
-      ]);
-      
-      const allLayouts = [...coverLayouts, ...regularLayouts];
-      
-      const newPagesData: Record<number, PageData> = {};
-      
-      // Инициализируем все страницы
-      for (let pageNum = 1; pageNum <= TOTAL_PAGES; pageNum++) {
-        const pageLayout = allLayouts.find(l => l.pageNumber === pageNum);
-        const pageTemplate = pageNum === 1 ? coverPageTemplate : template;
-        
-        if (pageLayout) {
-          newPagesData[pageNum] = {
-            columns: pageLayout.columns || [],
-            headerContent: pageLayout.headerContent || (pageNum === 1 ? '' : (pageTemplate.headers?.content || 'Заголовок газеты')),
-            layoutTitle: pageLayout.title,
-            layoutId: pageLayout.id,
-            layoutIllustrations: pageLayout.illustrations || [],
-          };
-          
-          // Если это первая страница и есть headerContent, используем его как название газеты
-          if (pageNum === 1 && pageLayout.headerContent) {
-            setNewspaperTitle(pageLayout.headerContent);
-          }
-        } else {
-          newPagesData[pageNum] = {
-            columns: buildEmptyColumns(pageTemplate),
-            headerContent: pageNum === 1 ? '' : (pageTemplate.headers?.content || 'Заголовок газеты'),
-            layoutTitle: pageNum === 1 ? 'Обложка' : `Страница ${pageNum}`,
-            layoutId: null,
-            layoutIllustrations: [],
-          };
-        }
-      }
-      
-      setPagesData(newPagesData);
-      setAutoSaveMessage('Макеты загружены');
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Не удалось загрузить макеты';
-      setSaveError(errorMessage);
-      setAutoSaveMessage(errorMessage);
-      
-      // Инициализируем пустые страницы при ошибке
-      const newPagesData: Record<number, PageData> = {};
-      for (let pageNum = 1; pageNum <= TOTAL_PAGES; pageNum++) {
-        const pageTemplate = pageNum === 1 ? coverPageTemplate : template;
-        newPagesData[pageNum] = {
-          columns: buildEmptyColumns(pageTemplate),
-          headerContent: pageNum === 1 ? '' : (pageTemplate.headers?.content || 'Заголовок газеты'),
-          layoutTitle: pageNum === 1 ? 'Обложка' : `Страница ${pageNum}`,
-          layoutId: null,
-          layoutIllustrations: [],
-        };
-      }
-      setPagesData(newPagesData);
-    } finally {
-      setLayoutsLoading(false);
-    }
-  }, [buildEmptyColumns]);
+  const initPageData = useCallback((pageNum: number, template: PageTemplate): PageData => {
+    return initPageDataPure(pageNum, template);
+  }, []);
 
-  const fetchTemplates = useCallback(async () => {
-    setTemplatesLoading(true);
-    setTemplatesError(null);
-    try {
-      const fetchedTemplates = await templateAPI.getTemplates();
-      if (fetchedTemplates.length === 0) {
-        setTemplates([defaultPageTemplate]);
-        setSelectedTemplate(defaultPageTemplate);
-        await loadLayoutsForAllPages(defaultPageTemplate);
-      } else {
-        setTemplates(fetchedTemplates);
-        const template = fetchedTemplates[0];
-        setSelectedTemplate(template);
-        await loadLayoutsForAllPages(template);
-      }
-    } catch (error) {
-      const fallbackTemplate = defaultPageTemplate;
-      setTemplates([fallbackTemplate]);
-      setSelectedTemplate(fallbackTemplate);
-      await loadLayoutsForAllPages(fallbackTemplate);
-      setTemplatesError(error instanceof Error ? error.message : 'Не удалось загрузить шаблоны');
-    } finally {
-      setTemplatesLoading(false);
-    }
-  }, [loadLayoutsForAllPages]);
+  const reflowFromPosition = useCallback((
+    prev: Record<number, PageData>,
+    startPage: number,
+    startColIndex: number,
+    startContainerIndex: number,
+    prepend: FlowItem[],
+    skipArticleId?: string
+  ): Record<number, PageData> => {
+    return reflowFromPositionPure(
+      prev,
+      startPage,
+      startColIndex,
+      startContainerIndex,
+      prepend,
+      inferArticleIdFromHtml,
+      getTemplateForPage,
+      allIllustrations,
+      skipArticleId
+    );
+  }, [allIllustrations, getTemplateForPage, inferArticleIdFromHtml]);
 
-  useEffect(() => {
-    fetchTemplates();
-  }, [fetchTemplates]);
-
-  // Автосохранение текущей страницы
-  useEffect(() => {
-    if (!selectedTemplate) return;
-    if (layoutsLoading || templatesLoading) return;
-    if (skipAutoSaveRef.current) {
-      skipAutoSaveRef.current = false;
-      return;
-    }
-
-    const pageData = pagesData[currentPage];
-    if (!pageData) return;
-
-    if (autoSaveTimeoutRef.current) {
-      clearTimeout(autoSaveTimeoutRef.current);
-    }
-
-    autoSaveTimeoutRef.current = setTimeout(async () => {
-      try {
-        const pageTemplate = getTemplateForPage(currentPage);
-        const templateIdForSave = selectedTemplate ? selectedTemplate.id : pageTemplate.id;
-        const payload = {
-          // Для сохранения всегда используем реальный templateId из базы (selectedTemplate),
-          // чтобы не отправлять локальный id обложки (`cover_page`)
-          templateId: templateIdForSave,
-          title: pageData.layoutTitle || (currentPage === 1 ? 'Обложка' : `Страница ${currentPage}`),
-          columns: pageData.columns,
-          headerContent: currentPage === 1 ? newspaperTitle : pageData.headerContent,
-          illustrations: pageData.layoutIllustrations,
-          pageNumber: currentPage,
-        };
-
-        let saved: Layout;
-        if (pageData.layoutId) {
-          saved = await layoutAPI.updateLayout(pageData.layoutId, payload);
-        } else {
-          saved = await layoutAPI.createLayout(payload);
-        }
-        
-        const newPagesData = { ...pagesData };
-        newPagesData[currentPage] = {
-          ...pageData,
-          layoutId: saved.id,
-          layoutTitle: saved.title,
-        };
-        setPagesData(newPagesData);
-        setAutoSaveMessage(`Страница ${currentPage} сохранена`);
-        setSaveError(null);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Ошибка сохранения макета';
-        setSaveError(errorMessage);
-        setAutoSaveMessage(errorMessage);
-      }
-    }, 1200);
-
-    return () => {
-      if (autoSaveTimeoutRef.current) {
-        clearTimeout(autoSaveTimeoutRef.current);
-      }
-    };
-  }, [
+  useLayoutAutoSave({
     selectedTemplate,
     currentPage,
     pagesData,
-    newspaperTitle,
+    getTemplateForPage,
     layoutsLoading,
     templatesLoading,
-    getTemplateForPage,
-  ]);
-
-  const handleTemplateChange = useCallback((templateId: string) => {
-    const next = templates.find(t => t.id === templateId);
-    if (next) {
-      setSelectedTemplate(next);
-      loadLayoutsForAllPages(next);
-    }
-  }, [templates, loadLayoutsForAllPages]);
-
-  const handleReloadTemplate = useCallback(() => {
-    if (selectedTemplate) {
-      loadLayoutsForAllPages(selectedTemplate);
-    }
-  }, [selectedTemplate, loadLayoutsForAllPages]);
+    skipAutoSaveRef,
+    setPagesData,
+    setAutoSaveMessage,
+    setSaveError,
+  });
 
   const handlePageChange = useCallback((pageNumber: number) => {
     setCurrentPage(pageNumber);
@@ -617,396 +124,58 @@ const LayoutDesignerWorkspace: React.FC = () => {
   }, []);
 
   const updateCurrentPageData = useCallback((updates: Partial<PageData>) => {
-    setPagesData(prev => ({
-      ...prev,
-      [currentPage]: {
-        ...prev[currentPage],
-        ...updates,
-      },
-    }));
-  }, [currentPage]);
-
-  const getColumnUsedSpace = useCallback((column: ColumnContainer[]): { chars: number; lines: number } => {
-    let totalChars = 0;
-    let totalLines = 0;
-    let filledCount = 0;
-    const approxLineHeightPx = 18;
-    const inlineIllustrationExtraPx = 28;
-    
-    column.forEach(cont => {
-      if (cont.isFilled) {
-        filledCount += 1;
-        if (cont.kind === 'illustration') {
-          const h = cont.height && cont.height > 0 ? cont.height : 120;
-          totalLines += Math.ceil((h + inlineIllustrationExtraPx) / approxLineHeightPx);
-        } else {
-          totalChars += getTextLength(cont.content);
-          totalLines += getTextLines(cont.content);
-        }
-      }
-    });
-
-    // UI-оверход, который реальный DOM занимает по высоте, но не учитывается в getTextLines:
-    // - паддинги .page-column (12px сверху/снизу)
-    // - drop-зоны между контейнерами (10px)
-    // - вертикальные отступы между контейнерами (8px)
-    // Если это не учитывать, низ текста может визуально клипаться (кажется, что он "уходит под иллюстрацию").
-    const columnPaddingPx = 24;
-    const dropZoneHeightPx = 10;
-    const containerGapPx = 8;
-    const filledContainerPaddingPx = 16;
-    const dropZonesCount = column.length > 0 ? (column.length + 1) : 0;
-    const gapsCount = Math.max(0, column.length - 1);
-    const overheadPx =
-      columnPaddingPx +
-      (dropZonesCount * dropZoneHeightPx) +
-      (gapsCount * containerGapPx) +
-      (filledCount * filledContainerPaddingPx);
-    const overheadLines = overheadPx > 0 ? Math.ceil(overheadPx / approxLineHeightPx) : 0;
-    totalLines += overheadLines;
-
-    // Минимальный запас, чтобы не было клипа на 1 строку из-за неточностей метрик/шрифтов
-    totalLines += 1;
-    
-    return { chars: totalChars, lines: totalLines };
-  }, []);
-
-  const getColumnCapacity = useCallback((template: PageTemplate, columnIndex: number): { maxChars: number; maxLines: number } => {
-    const slots = template.illustrationPositions.filter(pos => pos.allowedColumns.includes(columnIndex)).length;
-    const illustrationSlotHeightPx = 120;
-    const illustrationGapPx = 12;
-    const approxLineHeightPx = 18;
-    const reservedPx = slots > 0
-      ? (slots * illustrationSlotHeightPx) + ((slots - 1) * illustrationGapPx) + illustrationGapPx
-      : 0;
-    const reservedLines = reservedPx > 0 ? Math.ceil(reservedPx / approxLineHeightPx) : 0;
-    const SAFETY_LINES = slots > 0 ? 3 : 0;
-    const maxLines = Math.max(1, LINES_PER_COLUMN - reservedLines - SAFETY_LINES);
-    const maxChars = Math.max(1, Math.floor(CHARS_PER_COLUMN * (maxLines / LINES_PER_COLUMN)));
-    return { maxChars, maxLines };
-  }, []);
-
-  const ensureEmptyContainerAtEnd = useCallback((
-    column: ColumnContainer[],
-    columnIndex: number,
-    remainingLines: number
-  ) => {
-    // Хотим показывать хвостовой пустой контейнер только когда места РЕАЛЬНО много.
-    // Иначе он выглядит как «лишний на 1–2 строки».
-    const MIN_EMPTY_DROP_LINES = 4;
-    const approxLineHeightPx = 18;
-
-    // Добавление хвостового пустого контейнера само по себе съедает место:
-    // - появится ещё 1 drop-zone снизу
-    // - появится gap между последним заполненным контейнером и пустым
-    // - у пустого контейнера есть внутренние padding (минимальная «интринсик» высота)
-    // Если это не учесть — пустой контейнер будет создаваться даже при маленьком остатке,
-    // визуально «лишний» и иногда выглядит как залезание под иллюстрацию.
-    const emptyContainerPaddingPx = 40;
-    const extraDropZonePx = 10;
-    const extraGapPx = 8;
-    const extraOverheadLines = Math.ceil(
-      (emptyContainerPaddingPx + extraDropZonePx + extraGapPx) / approxLineHeightPx
-    );
-
-    const predictedRemainingAfterEmpty = remainingLines - extraOverheadLines;
-
-    // Если места почти не осталось — не показываем/не создаём хвостовой пустой контейнер
-    if (predictedRemainingAfterEmpty < MIN_EMPTY_DROP_LINES) {
-      while (column.length > 0 && !column[column.length - 1].isFilled) {
-        column.pop();
-      }
-      return;
-    }
-
-    const hasEmpty = column.some(cont => !cont.isFilled);
-    if (hasEmpty) return;
-
-    column.push({
-      id: `col_${columnIndex}_container_${Date.now()}_${Math.random()}`,
-      columnIndex,
-      content: '',
-      height: 0,
-      isFilled: false,
-    });
-  }, []);
-
-  const handleDeleteContainer = useCallback((columnIndex: number, containerIndex: number) => {
-    setPagesData(prev => {
-      const current = prev[currentPage] || {
-        columns: [],
-        headerContent: currentPage === 1 ? '' : 'Заголовок газеты',
-        layoutTitle: currentPage === 1 ? 'Обложка' : `Страница ${currentPage}`,
-        layoutId: null,
-        layoutIllustrations: [],
-      };
-
-      const col = current.columns[columnIndex];
-      const cont = col ? col[containerIndex] : undefined;
-      if (!cont || !cont.isFilled || !cont.content) return prev;
-
-      const deleteArticleId = cont.articleId || inferArticleIdFromHtml(cont.content);
-      if (!deleteArticleId) {
-        const template = getTemplateForPage(currentPage);
-        const basePageData = prev[currentPage] || initPageData(currentPage, template);
-        const columns = (basePageData.columns && basePageData.columns.length > 0 ? basePageData.columns : buildEmptyColumns(template))
-          .map(col2 => col2.map(c => ({ ...c })));
-        if (columns[columnIndex] && columns[columnIndex][containerIndex]) {
-          columns[columnIndex][containerIndex] = {
-            ...columns[columnIndex][containerIndex],
-            content: '',
-            isFilled: false,
-            articleId: undefined,
-          };
-        }
-        return { ...prev, [currentPage]: { ...basePageData, columns } };
-      }
-
-      let startPage = -1;
-      let startCol = -1;
-      let startContainer = -1;
-
-      for (let pageNum = 1; pageNum <= TOTAL_PAGES; pageNum++) {
-        const template = getTemplateForPage(pageNum);
-        const basePageData = prev[pageNum] || initPageData(pageNum, template);
-        const cols = basePageData.columns || [];
-        for (let c = 0; c < template.columns; c++) {
-          const column = cols[c] || [];
-          for (let i = 0; i < column.length; i++) {
-            const candidate = column[i];
-            if (!candidate.isFilled || !candidate.content) continue;
-            const resolved = candidate.articleId || inferArticleIdFromHtml(candidate.content);
-            if (resolved === deleteArticleId) {
-              startPage = pageNum;
-              startCol = c;
-              startContainer = i;
-              break;
-            }
-          }
-          if (startPage !== -1) break;
-        }
-        if (startPage !== -1) break;
-      }
-
-      if (startPage === -1) return prev;
-
-      return reflowFromPosition(prev, startPage, startCol, startContainer, [], deleteArticleId);
-    });
-  }, [currentPage, getTemplateForPage, inferArticleIdFromHtml, initPageData, reflowFromPosition]);
-
-  const handleDropArticle = useCallback((articleId: string, columnIndex: number, containerIndex: number) => {
-    const article = articles.find(a => a.id === articleId);
-    if (!article) return;
-
     setPagesData(prev => {
       const template = getTemplateForPage(currentPage);
-      const basePageData = prev[currentPage] || initPageData(currentPage, template);
-      const columns = (basePageData.columns && basePageData.columns.length > 0 ? basePageData.columns : buildEmptyColumns(template))
-        .map(col => col.map(cont => ({ ...cont })));
-
-      const startColumn = columns[columnIndex] || [];
-      let normalizedInsertIndex = Math.min(containerIndex, startColumn.length);
-      if (
-        normalizedInsertIndex === startColumn.length &&
-        normalizedInsertIndex > 0 &&
-        !startColumn[normalizedInsertIndex - 1].isFilled
-      ) {
-        normalizedInsertIndex -= 1;
-      }
-
-      const next = { ...prev, [currentPage]: { ...basePageData, columns } };
-      return reflowFromPosition(
-        next,
-        currentPage,
-        columnIndex,
-        normalizedInsertIndex,
-        [{ kind: 'text', articleId: article.id, html: article.content, source: 'new' }],
-        undefined
-      );
-    });
-  }, [articles, buildEmptyColumns, currentPage, getTemplateForPage, initPageData, reflowFromPosition]);
-
-  const handleDropInlineIllustration = useCallback((
-    illustrationId: string,
-    columnIndex: number,
-    containerIndex: number,
-    dropRatio?: number
-  ) => {
-    const illustration = allIllustrations.find(ill => ill.id === illustrationId);
-    if (!illustration) return;
-
-    const INLINE_ILLUSTRATION_HEIGHT_PX = 120;
-
-    setPagesData(prev => {
-      const template = getTemplateForPage(currentPage);
-      const basePageData = prev[currentPage] || initPageData(currentPage, template);
-      const columns = (basePageData.columns && basePageData.columns.length > 0 ? basePageData.columns : buildEmptyColumns(template))
-        .map(col => col.map(cont => ({ ...cont })));
-
-      const startColumn = columns[columnIndex] || [];
-      let normalizedInsertIndex = Math.min(containerIndex, startColumn.length);
-      if (
-        normalizedInsertIndex === startColumn.length &&
-        normalizedInsertIndex > 0 &&
-        !startColumn[normalizedInsertIndex - 1].isFilled
-      ) {
-        normalizedInsertIndex -= 1;
-      }
-
-      const splitHtmlByDropRatio = (html: string, ratio: number): { beforeHtml: string; afterHtml: string } => {
-        const SNAP_TOP = 0.05;
-        const SNAP_BOTTOM = 0.95;
-        if (ratio <= SNAP_TOP) {
-          return { beforeHtml: '', afterHtml: html || '' };
-        }
-        if (ratio >= SNAP_BOTTOM) {
-          return { beforeHtml: html || '', afterHtml: '' };
-        }
-
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html || '', 'text/html');
-        const nodes = Array.from(doc.body.childNodes);
-        const serializeNode = (node: ChildNode): string => {
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            return (node as Element).outerHTML;
-          }
-          if (node.nodeType === Node.TEXT_NODE) {
-            return node.textContent || '';
-          }
-          return '';
-        };
-        const blocks = nodes
-          .map(serializeNode)
-          .map(s => s.trim())
-          .filter(Boolean);
-
-        if (blocks.length <= 1) {
-          if (ratio < 0.5) {
-            return { beforeHtml: '', afterHtml: html || '' };
-          }
-          return { beforeHtml: html || '', afterHtml: '' };
-        }
-
-        const splitPointRaw = Math.round(blocks.length * ratio);
-        const splitPoint = Math.max(1, Math.min(blocks.length - 1, splitPointRaw));
-        return {
-          beforeHtml: blocks.slice(0, splitPoint).join(''),
-          afterHtml: blocks.slice(splitPoint).join(''),
-        };
-      };
-
-      if (
-        typeof dropRatio === 'number' &&
-        dropRatio >= 0 &&
-        dropRatio <= 1 &&
-        startColumn[normalizedInsertIndex] &&
-        startColumn[normalizedInsertIndex].isFilled &&
-        (startColumn[normalizedInsertIndex].kind || 'text') === 'text' &&
-        startColumn[normalizedInsertIndex].content
-      ) {
-        const target = startColumn[normalizedInsertIndex];
-        const { beforeHtml, afterHtml } = splitHtmlByDropRatio(target.content, dropRatio);
-        const items: FlowItem[] = [];
-        if (beforeHtml.trim()) {
-          items.push({ kind: 'text', articleId: target.articleId, html: beforeHtml, source: 'existing' });
-        }
-        items.push({ kind: 'illustration', illustrationId: illustration.id, span: 1, heightPx: INLINE_ILLUSTRATION_HEIGHT_PX, source: 'new' });
-        if (afterHtml.trim()) {
-          items.push({ kind: 'text', articleId: target.articleId, html: afterHtml, source: 'existing' });
-        }
-
-        startColumn.splice(normalizedInsertIndex, 1);
-
-        const next = { ...prev, [currentPage]: { ...basePageData, columns } };
-        return reflowFromPosition(
-          next,
-          currentPage,
-          columnIndex,
-          normalizedInsertIndex,
-          items,
-          undefined
-        );
-      }
-
-      const next = { ...prev, [currentPage]: { ...basePageData, columns } };
-      return reflowFromPosition(
-        next,
-        currentPage,
-        columnIndex,
-        normalizedInsertIndex,
-        [{ kind: 'illustration', illustrationId: illustration.id, span: 1, heightPx: INLINE_ILLUSTRATION_HEIGHT_PX, source: 'new' }],
-        undefined
-      );
-    });
-  }, [allIllustrations, buildEmptyColumns, currentPage, getTemplateForPage, initPageData, reflowFromPosition]);
-
-  const handleDeleteInlineIllustration = useCallback((columnIndex: number, containerIndex: number) => {
-    setPagesData(prev => {
-      const template = getTemplateForPage(currentPage);
-      const basePageData = prev[currentPage] || initPageData(currentPage, template);
-      const columns = (basePageData.columns && basePageData.columns.length > 0 ? basePageData.columns : buildEmptyColumns(template))
-        .map(col => col.map(cont => ({ ...cont })));
-
-      const col = columns[columnIndex] || [];
-      const target = col[containerIndex];
-      if (!target || !target.isFilled || target.kind !== 'illustration') return prev;
-
-      col.splice(containerIndex, 1);
-
-      const reflowStartIndex = Math.max(0, containerIndex - 1);
-
-      const next = { ...prev, [currentPage]: { ...basePageData, columns } };
-      return reflowFromPosition(next, currentPage, columnIndex, reflowStartIndex, [], undefined);
-    });
-  }, [buildEmptyColumns, currentPage, getTemplateForPage, initPageData, reflowFromPosition]);
-
-  const handleDropIllustration = useCallback((illustrationId: string, columnIndex: number, positionIndex: number) => {
-    const illustration = allIllustrations.find(ill => ill.id === illustrationId);
-    if (!illustration) return;
-
-    const pageTemplate = getTemplateForPage(currentPage);
-    const positions = pageTemplate.illustrationPositions.filter(
-      pos => pos.allowedColumns.includes(columnIndex)
-    );
-    if (positionIndex >= positions.length) return;
-
-    updateCurrentPageData({
-      layoutIllustrations: [
-        ...currentPageData.layoutIllustrations.filter(
-          li => !(li.columnIndex === columnIndex && li.positionIndex === positionIndex) &&
-                li.illustrationId !== illustrationId
-        ),
-        {
-          illustrationId,
-          columnIndex,
-          positionIndex,
+      const base = prev[currentPage] || initPageData(currentPage, template);
+      return {
+        ...prev,
+        [currentPage]: {
+          ...base,
+          ...updates,
         },
-      ],
+      };
     });
-  }, [allIllustrations, currentPage, currentPageData, getTemplateForPage, updateCurrentPageData]);
+  }, [currentPage, getTemplateForPage, initPageData]);
 
-  const handleDeleteIllustration = useCallback((columnIndex: number, positionIndex: number) => {
-    updateCurrentPageData({
-      layoutIllustrations: currentPageData.layoutIllustrations.filter(
-        li => !(li.columnIndex === columnIndex && li.positionIndex === positionIndex)
-      ),
-    });
-  }, [currentPageData, updateCurrentPageData]);
+  const { bulkActionLoading: bulkActionLoadingFromHook, handleClearCurrentPage, handleClearAllPages } = useLayoutDesignerBulkActions({
+    currentPage,
+    pagesData,
+    getTemplateForPage,
+    initPageData,
+    buildEmptyColumns,
+    setPagesData,
+    setSaveError,
+    setAutoSaveMessage,
+    skipAutoSaveRef,
+  });
 
-  const handleArticleDragStart = useCallback((e: React.DragEvent, articleId: string) => {
-    e.dataTransfer.setData('articleId', articleId);
-  }, []);
+  const bulkActionLoading = bulkActionLoadingFromHook;
 
-  const handleIllustrationDragStart = useCallback((e: React.DragEvent, illustrationId: string) => {
-    e.dataTransfer.setData('illustrationId', illustrationId);
-  }, []);
+  const { handleDropIllustration, handleDeleteIllustration, handleDropAd, handleDeleteAd } = useLayoutDesignerSlotActions({
+    allIllustrations,
+    allAds,
+    currentPage,
+    currentPageData,
+    getTemplateForPage,
+    updateCurrentPageData,
+  });
+
+  const { handleArticleDragStart, handleIllustrationDragStart, handleAdDragStart } = useLayoutDesignerDragStart();
+
+  const { handleDeleteContainer, handleDropArticle, handleDropInlineIllustration, handleDeleteInlineIllustration } = useLayoutDesignerColumnActions({
+    articles,
+    allIllustrations,
+    currentPage,
+    getTemplateForPage,
+    initPageData,
+    buildEmptyColumns,
+    inferArticleIdFromHtml,
+    reflowFromPosition,
+    setPagesData,
+  });
 
   const handleHeaderChange = useCallback((content: string) => {
-    if (currentPage === 1) {
-      setNewspaperTitle(content);
-    } else {
-      updateCurrentPageData({ headerContent: content });
-    }
+    void content;
   }, [currentPage, updateCurrentPageData]);
 
   const currentTemplate = getTemplateForPage(currentPage);
@@ -1018,9 +187,15 @@ const LayoutDesignerWorkspace: React.FC = () => {
         templates={templates}
         templatesLoading={templatesLoading}
         layoutsLoading={layoutsLoading}
+        currentPage={currentPage}
+        inlineIllustrationSpan={inlineIllustrationSpan}
+        bulkActionLoading={bulkActionLoading}
         onTemplateChange={handleTemplateChange}
         onReloadTemplate={handleReloadTemplate}
         onRefreshTemplates={fetchTemplates}
+        onClearCurrentPage={handleClearCurrentPage}
+        onClearAllPages={handleClearAllPages}
+        onInlineIllustrationSpanChange={setInlineIllustrationSpan}
         autoSaveMessage={autoSaveMessage}
       />
 
@@ -1046,9 +221,11 @@ const LayoutDesignerWorkspace: React.FC = () => {
           <div className="layout-workspace-content">
             <LayoutArticlesSidebar
               approvedArticles={approvedArticles}
-              allIllustrations={allIllustrations}
+              allIllustrations={allIllustrations.filter(i => i.kind !== 'ad')}
+              allAds={allAds}
               onArticleDragStart={handleArticleDragStart}
               onIllustrationDragStart={handleIllustrationDragStart}
+              onAdDragStart={handleAdDragStart}
             />
             <div className="layout-page-area">
               <div className="page-layout-wrapper">
@@ -1057,10 +234,15 @@ const LayoutDesignerWorkspace: React.FC = () => {
                     template={currentTemplate}
                     newspaperTitle={newspaperTitle}
                     onNewspaperTitleChange={setNewspaperTitle}
+                    interactionDisabled={layoutsLoading || templatesLoading}
                     illustrations={allIllustrations}
                     layoutIllustrations={currentPageData.layoutIllustrations}
                     onDropIllustration={handleDropIllustration}
                     onDeleteIllustration={handleDeleteIllustration}
+                    ads={allAds}
+                    layoutAds={currentPageData.layoutAds}
+                    onDropAd={handleDropAd}
+                    onDeleteAd={handleDeleteAd}
                   />
                 ) : (
                   <PageLayout
@@ -1069,6 +251,7 @@ const LayoutDesignerWorkspace: React.FC = () => {
                     columns={currentPageData.columns}
                     globalFirstOccurrenceByArticleId={globalFirstOccurrenceByArticleId}
                     interactionDisabled={layoutsLoading || templatesLoading}
+                    inlineIllustrationSpan={inlineIllustrationSpan}
                     onDropArticle={handleDropArticle}
                     onDropInlineIllustration={handleDropInlineIllustration}
                     onDeleteContainer={handleDeleteContainer}

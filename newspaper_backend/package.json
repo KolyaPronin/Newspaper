@@ -1,0 +1,30 @@
+{
+  "name": "newspaper_backend",
+  "version": "1.0.0",
+  "description": "Backend API for newspaper editorial management system",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "init-users": "node src/scripts/initUsers.js",
+    "init-templates": "node src/scripts/initTemplates.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["newspaper", "api", "editorial"],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "chalk": "^4.1.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.19.4",
+    "multer": "^1.4.5-lts.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.11"
+  }
+}

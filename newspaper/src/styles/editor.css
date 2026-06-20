@@ -1,0 +1,121 @@
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 0 10px 0;
+  padding: 8px;
+  background: rgba(21, 24, 33, 0.35);
+  border: 1px solid rgba(38, 42, 54, 0.3);
+  border-radius: 10px;
+  backdrop-filter: blur(6px);
+}
+
+.tool-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+}
+
+.tool-select {
+  background: #0e1016;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+
+.tool-select:hover {
+  border-color: var(--accent);
+}
+
+.tool-btn {
+  appearance: none;
+  background: #0e1016;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, transform .02s ease;
+}
+
+.tool-btn:hover {
+  background: #141824;
+  border-color: var(--accent);
+}
+
+.tool-btn:active {
+  transform: translateY(1px);
+}
+
+.tool-btn.active {
+  background: var(--accent);
+  color: #0c0e14;
+  border-color: var(--accent);
+}
+
+.editor-image {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 12px auto;
+  display: block;
+}
+
+.editor-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  overflow-x: auto;
+}
+
+.editor-table th,
+.editor-table td {
+  border: 1px solid rgba(38, 42, 54, 0.4);
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.editor-table th {
+  background: rgba(21, 24, 33, 0.45);
+}
+
+.author-editor-wrapper {
+  background: rgba(21, 24, 33, 0.2);
+  border: 1px solid rgba(38, 42, 54, 0.3);
+  border-radius: 12px;
+  padding: 20px;
+  backdrop-filter: blur(6px);
+}
+
+.editor-content-wrapper .ProseMirror {
+  min-height: 200px;
+  outline: none;
+}
+
+.editor-content-wrapper .ProseMirror p.is-editor-empty:first-child::before {
+  content: 'Начните писать статью...';
+  float: left;
+  color: var(--subtext);
+  pointer-events: none;
+  height: 0;
+}
+
+.proofreader-editor {
+  margin-top: 32px;
+}
+
+

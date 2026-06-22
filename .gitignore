@@ -1,0 +1,50 @@
+# ===== OS / Editor =====
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+.idea/
+.vscode/
+*.iml
+.kiro
+# ===== Logs =====
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ===== Node / JS =====
+node_modules/
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+.cache/
+
+# Coverage
+coverage/
+
+# ===== Env files / secrets =====
+.env
+.env.*
+!.env.example
+
+# ===== TypeScript =====
+*.tsbuildinfo
+
+# ===== Temporary files =====
+tmp/
+temp/
+*.tmp
+*.swp
+
+# ===== Backend uploads =====
+# Keep placeholder file so folder exists in git
+newspaper_backend/uploads/**
+!newspaper_backend/uploads/.gitkeep
+

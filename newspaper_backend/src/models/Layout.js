@@ -103,6 +103,11 @@ const layoutSchema = new mongoose.Schema({
     enum: ['draft', 'in_review', 'published'],
     default: 'draft',
   },
+  reviewComment: {
+    type: String,
+    default: null,
+    trim: true,
+  },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

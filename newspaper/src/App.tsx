@@ -1,5 +1,5 @@
 import React from 'react';
-import './styles/App.css';
+import './styles/base.css';
 import Dashboard from './pages/Dashboard/Dashboard';
 import { AuthProvider } from './contexts/AuthContexts';
 import { ArticleProvider } from './contexts/ArticleContext';

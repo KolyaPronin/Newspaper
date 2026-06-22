@@ -6,6 +6,8 @@ const connectDB = require('./config/database');
 const requestLogger = require('./middleware/requestLogger');
 const errorHandler = require('./middleware/errorHandler');
 
+const checkDatabase = require('./middleware/checkDatabase');
+
 const app = express();
 
 connectDB();
@@ -26,6 +28,8 @@ app.use('/api/users', require('./routes/userRoutes'));
 app.use('/api/templates', require('./routes/templateRoutes'));
 app.use('/api/layouts', require('./routes/layoutRoutes'));
 app.use('/api/illustrations', require('./routes/illustrationRoutes'));
+app.use('/api/tasks', require('./routes/taskRoutes'));
+app.use('/api/issues', require('./routes/issueRoutes'));
 
 app.get('/api/health', (req, res) => {
   res.json({

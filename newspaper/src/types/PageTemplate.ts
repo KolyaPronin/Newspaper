@@ -50,7 +50,41 @@ export interface ColumnContainer {
   columnIndex: number;
   content: string; // HTML контент статьи
   articleId?: string;
+  kind?: 'text' | 'illustration';
+  illustrationId?: string;
+  span?: 1 | 2;
+  spanRole?: 'main' | 'ghost';
   height: number; // высота в пикселях
   isFilled: boolean;
+  float?: 'left' | 'right';
+  anchorParagraphIndex?: number | null;
+}
+
+export interface LayoutIllustration {
+  illustrationId: string;
+  columnIndex: number;
+  positionIndex: number; // индекс позиции в illustrationPositions
+}
+
+export interface LayoutAd {
+  illustrationId: string;
+  slotIndex: number;
+}
+
+export interface Layout {
+  id: string;
+  title: string;
+  templateId: string;
+  issueId?: string | null;
+  pageNumber?: number | null;
+  headerContent?: string;
+  footerContent?: string;
+  columns: ColumnContainer[][];
+  illustrations?: LayoutIllustration[]; // привязка иллюстраций к слотам
+  ads?: LayoutAd[];
+  status: 'draft' | 'in_review' | 'published';
+  reviewComment?: string | null;
+  updatedAt: string;
+  createdAt: string;
 }
 

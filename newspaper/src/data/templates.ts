@@ -6,10 +6,18 @@ export const defaultPageTemplate: PageTemplate = {
   columns: 3,
   adSlots: [
     {
-      id: 'ad_bottom',
+      id: 'ad_bottom_left',
       x: 5,
       y: 85,
-      width: 90,
+      width: 45,
+      height: 10,
+      allowedContentTypes: ['image', 'text'],
+    },
+    {
+      id: 'ad_bottom_right',
+      x: 50,
+      y: 85,
+      width: 45,
       height: 10,
       allowedContentTypes: ['image', 'text'],
     },
@@ -48,8 +56,8 @@ export const defaultPageTemplate: PageTemplate = {
     height: 5,
   },
   footers: {
-    content: 'Номер страницы',
-    height: 3,
+    content: '',
+    height: 0,
   },
   textFlowRules: {
     wrapAroundIllustrations: true,
@@ -57,4 +65,41 @@ export const defaultPageTemplate: PageTemplate = {
     multiColumnContinuation: true,
   },
 };
+
+export const coverPageTemplate: PageTemplate = {
+  id: 'cover_page',
+  name: 'Обложка (первая страница)',
+  columns: 1,
+  adSlots: [],
+  illustrationPositions: [
+    {
+      id: 'cover_main',
+      allowedColumns: [0],
+      maxWidth: 100,
+      maxHeight: 400,
+      textWrapping: 'below',
+    },
+  ],
+  margins: {
+    top: 15,
+    bottom: 15,
+    left: 10,
+    right: 10,
+  },
+  headers: {
+    content: '',
+    height: 0,
+  },
+  footers: {
+    content: '',
+    height: 0,
+  },
+  textFlowRules: {
+    wrapAroundIllustrations: false,
+    wrapAroundAds: false,
+    multiColumnContinuation: false,
+  },
+};
+
+export const TOTAL_PAGES = 10;
 

@@ -1,5 +1,7 @@
 const Layout = require('../models/Layout');
 const Template = require('../models/Template');
+const taskService = require('../services/taskService');
+const mongoose = require('mongoose');
 
 const validateLayoutPayload = (body) => {
   if (!body.templateId) {
@@ -20,9 +22,27 @@ const getLayouts = async (req, res) => {
   try {
     const { templateId, issueId, pageNumber, limit = 20 } = req.query;
     const filter = {};
-    if (templateId) filter.templateId = templateId;
-    if (issueId) filter.issueId = issueId;
+    // Avoid Mongoose casting errors when clients pass placeholder IDs like "default_3col".
+    if (templateId) {
+      if (!mongoose.isValidObjectId(templateId)) {
+        return res.status(400).json({
+          success: false,
+          error: 'templateId must be a valid Mongo ObjectId',
+        });
+      }
+      filter.templateId = templateId;
+    }
+    if (issueId) {
+      if (!mongoose.isValidObjectId(issueId)) {
+        return res.status(400).json({
+          success: false,
+          error: 'issueId must be a valid Mongo ObjectId',
+        });
+      }
+      filter.issueId = issueId;
+    }
     if (pageNumber) filter.pageNumber = pageNumber;
+    if (req.query.status) filter.status = req.query.status;
 
     const layouts = await populateLayout(
       Layout.find(filter)
@@ -109,9 +129,61 @@ const updateLayout = async (req, res) => {
     if (req.body.columns) layout.columns = req.body.columns;
     if (req.body.illustrations !== undefined) layout.illustrations = req.body.illustrations;
     if (req.body.ads !== undefined) layout.ads = req.body.ads;
-    if (req.body.status) layout.status = req.body.status;
+
+    let submittedForReview = false;
+
+    // Handle status transitions with role-based validation
+    if (req.body.status !== undefined) {
+      const newStatus = req.body.status;
+      const userRole = req.user.role;
+
+      if (newStatus === 'in_review') {
+        if (userRole !== 'layout_designer') {
+          return res.status(403).json({ success: false, error: 'Только верстальщик может отправить макет на проверку' });
+        }
+        if (layout.status !== 'draft') {
+          return res.status(400).json({ success: false, error: 'Можно отправить на проверку только макет в статусе draft' });
+        }
+        layout.status = 'in_review';
+        layout.reviewComment = null;
+        submittedForReview = true;
+      } else if (newStatus === 'published') {
+        if (userRole !== 'chief_editor') {
+          return res.status(403).json({ success: false, error: 'Только главред может одобрить макет' });
+        }
+        if (layout.status !== 'in_review') {
+          return res.status(400).json({ success: false, error: 'Можно одобрить только макет в статусе in_review' });
+        }
+        layout.status = 'published';
+        layout.reviewComment = null;
+      } else if (newStatus === 'draft' && req.body.reviewComment !== undefined) {
+        if (userRole !== 'chief_editor') {
+          return res.status(403).json({ success: false, error: 'Только главред может вернуть макет на доработку' });
+        }
+        if (layout.status !== 'in_review') {
+          return res.status(400).json({ success: false, error: 'Можно вернуть на доработку только макет в статусе in_review' });
+        }
+        if (!req.body.reviewComment || !req.body.reviewComment.trim()) {
+          return res.status(400).json({ success: false, error: 'Замечания обязательны при возврате на доработку' });
+        }
+        layout.status = 'draft';
+        layout.reviewComment = req.body.reviewComment.trim();
+      } else {
+        // Regular status update (e.g. autosave keeping draft status)
+        layout.status = newStatus;
+      }
+    }
+
+    // Handle reviewComment update separately (for non-status-transition updates)
+    if (req.body.reviewComment !== undefined && req.body.status === undefined) {
+      layout.reviewComment = req.body.reviewComment;
+    }
 
     await layout.save();
+
+    if (submittedForReview && layout.issueId) {
+      await taskService.onLayoutSubmittedForReview(layout.issueId, req.user.id);
+    }
 
     const populated = await populateLayout(Layout.findById(layout._id));
 

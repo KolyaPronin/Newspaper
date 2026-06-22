@@ -13,9 +13,26 @@ export interface User {
   role: UserRole;
 }
 
+export interface LoginPayload {
+  email?: string;
+  username?: string;
+  password: string;
+}
+
+export interface RegisterPayload {
+  username: string;
+  email: string;
+  password: string;
+  role: UserRole;
+}
+
 export interface AuthContextType {
   user: User | null;
-  login: (user: User) => void;
-  logout: () => void;
-  hasRole: (role: UserRole) => boolean;
+  token: string | null;
+  loading: boolean;
+  error: string | null;
+  login: (payload: LoginPayload) => Promise<void>;
+  register: (payload: RegisterPayload) => Promise<void>;
+  logout: () => Promise<void>;
+  hasRole: (role: UserRole | UserRole[]) => boolean;
 }

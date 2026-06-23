@@ -42,7 +42,13 @@ const getLayouts = async (req, res) => {
       filter.issueId = issueId;
     }
     if (pageNumber) filter.pageNumber = pageNumber;
-    if (req.query.status) filter.status = req.query.status;
+    if (req.query.status) {
+      const statuses = String(req.query.status)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      filter.status = statuses.length > 1 ? { $in: statuses } : statuses[0];
+    }
 
     const layouts = await populateLayout(
       Layout.find(filter)
@@ -156,6 +162,9 @@ const updateLayout = async (req, res) => {
         }
         layout.status = 'published';
         layout.reviewComment = null;
+        if (layout.issueId) {
+          await taskService.onLayoutPagePublished(layout.issueId, req.user.id);
+        }
       } else if (newStatus === 'draft' && req.body.reviewComment !== undefined) {
         if (userRole !== 'chief_editor') {
           return res.status(403).json({ success: false, error: 'Только главред может вернуть макет на доработку' });

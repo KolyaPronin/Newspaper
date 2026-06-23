@@ -39,6 +39,11 @@ const issueSchema = new mongoose.Schema({
     ref: 'User',
     default: null,
   },
+  pdfPath: {
+    type: String,
+    default: null,
+    trim: true,
+  },
 }, {
   timestamps: true,
 });

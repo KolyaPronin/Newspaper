@@ -135,6 +135,40 @@ const findActiveIssueTask = async (issueId) => Task.findOne({
   status: { $nin: ['done', 'cancelled'] },
 });
 
+const uploadIssuePdf = async (req, res) => {
+  try {
+    const issueId = assertObjectId('id', req.params.id);
+    if (!issueId) {
+      return res.status(400).json({ success: false, error: 'Invalid issue id' });
+    }
+
+    const issue = await Issue.findById(issueId);
+    if (!issue) {
+      return res.status(404).json({ success: false, error: 'Issue not found' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'PDF file is required' });
+    }
+
+    const relativePath = `exports/${req.file.filename}`;
+    issue.pdfPath = relativePath;
+    await issue.save();
+
+    return res.json({
+      success: true,
+      data: {
+        issueId: issue._id,
+        pdfPath: issue.pdfPath,
+        pdfUrl: `/uploads/${issue.pdfPath}`,
+      },
+    });
+  } catch (error) {
+    const statusCode = error?.statusCode || 500;
+    return res.status(statusCode).json({ success: false, error: error.message });
+  }
+};
+
 const createAuthorArticleTask = async ({ issue, issueTask, plan, createdBy }) => {
   const article = await Article.create({
     title: plan.title,
@@ -353,4 +387,5 @@ module.exports = {
   getIssueById,
   startIssueWorkflow,
   addIssueArticle,
+  uploadIssuePdf,
 };

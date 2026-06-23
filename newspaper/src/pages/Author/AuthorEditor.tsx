@@ -3,10 +3,20 @@ import { EditorContent } from '@tiptap/react';
 import { useArticles } from '../../contexts/ArticleContext';
 import { useTipTapEditor } from '../../hooks/useTipTapEditor';
 import { useEditorToolbar } from '../../hooks/useEditorToolbar';
+import { useArticleTask } from '../../hooks/useArticleTask';
 import EditorToolbar from '../../components/Editor/EditorToolbar';
+
+const TASK_STATUS_LABEL: Record<string, string> = {
+  open: 'Новая',
+  in_progress: 'В работе',
+  done: 'Готово',
+  cancelled: 'Отменена',
+};
 
 const AuthorEditor: React.FC = () => {
   const { currentArticle, saveDraft, submitForReview, setCurrentArticle } = useArticles();
+  const articleId = currentArticle?.id || undefined;
+  const { task: articleTask, loading: articleTaskLoading } = useArticleTask(articleId);
   const [title, setTitle] = useState<string>(currentArticle?.title || '');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'submitting' | 'submitted' | 'error'>('idle');
@@ -122,6 +132,40 @@ const AuthorEditor: React.FC = () => {
               Статус: {currentArticle.status === 'draft' ? 'Черновик' : currentArticle.status === 'under_review' ? 'На проверке' : currentArticle.status}
               {currentArticle.updatedAt && ` • Обновлено: ${new Date(currentArticle.updatedAt).toLocaleString('ru-RU')}`}
             </div>
+            {articleId && (
+              <div className="author-task-brief">
+                {articleTaskLoading ? (
+                  <p className="author-task-brief-loading">Загрузка задания...</p>
+                ) : articleTask ? (
+                  <>
+                    <div className="author-task-brief-header">
+                      <span className="author-task-brief-label">Задание</span>
+                      <span className={`task-status task-status-${articleTask.status}`}>
+                        {TASK_STATUS_LABEL[articleTask.status] || articleTask.status}
+                      </span>
+                    </div>
+                    <h3 className="author-task-brief-title">{articleTask.title}</h3>
+                    {articleTask.issueInfo && (
+                      <p className="author-task-brief-meta">
+                        Выпуск
+                        {articleTask.issueInfo.number != null ? ` №${articleTask.issueInfo.number}` : ''}
+                        {articleTask.issueInfo.title ? `: ${articleTask.issueInfo.title}` : ''}
+                      </p>
+                    )}
+                    {articleTask.deadline && (
+                      <p className="author-task-brief-meta">
+                        Дедлайн: {new Date(articleTask.deadline).toLocaleDateString('ru-RU')}
+                      </p>
+                    )}
+                    <p className="author-task-brief-desc">
+                      {articleTask.description?.trim() || 'Описание задания не указано.'}
+                    </p>
+                  </>
+                ) : (
+                  <p className="author-task-brief-empty">К этой статье не привязано задание.</p>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>

@@ -102,7 +102,7 @@ const LayoutHeader: React.FC<LayoutHeaderProps> = ({
           </span>
         ) : layoutStatus === 'published' ? (
           <span className="layout-status-badge layout-status-published">
-            ✅ Опубликован
+            ✅ Готово
           </span>
         ) : (
           <button

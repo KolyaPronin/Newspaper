@@ -10,6 +10,7 @@ export interface IssueFromAPI {
   pageCount?: number | null;
   layoutNotes?: string;
   assignedLayoutDesignerId?: string | { _id: string; username?: string; role?: string } | null;
+  pdfPath?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -93,5 +94,18 @@ export const issueAPI = {
       return response.data;
     }
     throw new Error(response.error || 'Failed to create issue article');
+  },
+
+  uploadPdf: async (issueId: string, pdfBlob: Blob, filename: string): Promise<{ pdfUrl: string; pdfPath: string }> => {
+    const formData = new FormData();
+    formData.append('pdf', pdfBlob, filename);
+    const response = await fetchAPI<{ pdfUrl: string; pdfPath: string }>(`/issues/${issueId}/pdf`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (response.success && response.data) {
+      return response.data;
+    }
+    throw new Error(response.error || 'Failed to upload PDF');
   },
 };

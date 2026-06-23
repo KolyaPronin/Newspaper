@@ -255,6 +255,11 @@
   box-sizing: border-box;
 }
 
+.chief-editor-workspace--layout-review {
+  max-width: 1600px;
+  padding: 0 16px 32px;
+}
+
 .chief-editor-workspace .workspace-header {
   margin-bottom: 16px;
 }
@@ -2236,13 +2241,6 @@
 .layout-review-header h2 { margin: 0 0 6px 0; }
 .layout-review-header p { margin: 0; color: var(--subtext); font-size: 14px; }
 
-.layout-review-content {
-  display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 20px;
-  align-items: start;
-}
-
 .layout-review-list {
   background: rgba(21, 24, 33, 0.3);
   border: 1px solid rgba(38, 42, 54, 0.3);
@@ -2273,17 +2271,19 @@
 .layout-review-item-meta { font-size: 11px; color: var(--subtext); }
 
 .layout-review-preview {
-  background: rgba(21, 24, 33, 0.2);
-  border: 1px solid rgba(38, 42, 54, 0.3);
-  border-radius: 12px;
-  padding: 20px;
-  overflow: auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.layout-review-preview .layout-page-area {
+  flex: 1;
 }
 
 .layout-review-actions {
   display: flex;
   gap: 10px;
-  margin-bottom: 16px;
   flex-wrap: wrap;
 }
 
@@ -2294,6 +2294,28 @@
 
 .layout-review-approve:hover {
   background: rgba(34, 197, 94, 0.25);
+}
+
+.layout-review-success {
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: rgba(34, 197, 94, 0.12);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  border-radius: 8px;
+  color: #4ade80;
+  font-size: 13px;
+}
+
+.layout-review-status {
+  font-weight: 600;
+}
+
+.layout-review-status-in_review {
+  color: #818cf8;
+}
+
+.layout-review-status-published {
+  color: #4ade80;
 }
 
 /* Review comment block in LayoutHeader */
@@ -2338,35 +2360,6 @@
   background: rgba(34, 197, 94, 0.14);
   border: 1px solid rgba(34, 197, 94, 0.3);
   color: #4ade80;
-}
-
-/* Layout review page navigation */
-.layout-review-page-nav {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
-}
-
-.layout-review-page-btn {
-  padding: 4px 10px;
-  border-radius: 6px;
-  border: 1px solid rgba(38, 42, 54, 0.4);
-  background: rgba(14, 16, 22, 0.5);
-  color: var(--text);
-  font-size: 12px;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.layout-review-page-btn:hover {
-  border-color: var(--accent);
-}
-
-.layout-review-page-btn.active {
-  background: rgba(6, 191, 204, 0.15);
-  border-color: var(--accent);
-  font-weight: 600;
 }
 
 /* Task status icon buttons */

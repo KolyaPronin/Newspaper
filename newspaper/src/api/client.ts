@@ -93,4 +93,10 @@ export async function fetchAPI<T>(
 
 export { API_BASE_URL };
 
+export const getStaticAssetUrl = (assetPath: string): string => {
+  const base = API_BASE_URL.replace(/\/api$/, '');
+  const normalized = assetPath.startsWith('/') ? assetPath : `/${assetPath}`;
+  return `${base}${normalized}`;
+};
+
 

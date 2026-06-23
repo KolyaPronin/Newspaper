@@ -6,7 +6,7 @@ const ChiefEditorWorkspace: React.FC = () => {
   const [activeView, setActiveView] = useState<'tasks' | 'review'>('tasks');
 
   return (
-    <div className="chief-editor-workspace">
+    <div className={`chief-editor-workspace${activeView === 'review' ? ' chief-editor-workspace--layout-review' : ''}`}>
       <div className="workspace-header">
         <div>
           <h1>{activeView === 'tasks' ? 'Выпуски' : 'Проверка макетов'}</h1>

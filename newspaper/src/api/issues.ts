@@ -46,6 +46,14 @@ export interface CreateIssueArticlePayload {
 }
 
 export const issueAPI = {
+  getIssueById: async (id: string): Promise<IssueFromAPI> => {
+    const response = await fetchAPI<IssueFromAPI>(`/issues/${id}`);
+    if (response.success && response.data) {
+      return response.data;
+    }
+    throw new Error(response.error || 'Failed to fetch issue');
+  },
+
   getIssues: async (params?: { status?: string; limit?: number }): Promise<IssueFromAPI[]> => {
     const query = new URLSearchParams();
     if (params?.status) query.append('status', params.status);

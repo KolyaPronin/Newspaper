@@ -3,7 +3,6 @@ import { Article } from '../../types/Article';
 import { Illustration } from '../../utils/api';
 import {
   insertHtmlAtPoint,
-  buildFloatedImageHtml,
   insertAnchoredFigureAtPoint,
   applyAnchorWrap,
 } from './workspace/columnHtml/insertInColumn';
@@ -17,6 +16,7 @@ interface ColumnFlowBodyProps {
   illustrations: Illustration[];
   disabled?: boolean;
   onHtmlChange: (html: string) => void;
+  onDeleteArticle?: (articleId: string) => void;
 }
 
 const ColumnFlowBody: React.FC<ColumnFlowBodyProps> = ({
@@ -26,6 +26,7 @@ const ColumnFlowBody: React.FC<ColumnFlowBodyProps> = ({
   illustrations,
   disabled,
   onHtmlChange,
+  onDeleteArticle,
 }) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const lastSyncedRef = useRef<string | null>(null);
@@ -86,16 +87,22 @@ const ColumnFlowBody: React.FC<ColumnFlowBodyProps> = ({
 
     if (action === 'delete-article') {
       const articleId = actionEl.getAttribute('data-article-id');
-      if (articleId) {
-        const escaped = articleId.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        root.querySelectorAll(`[data-article-id="${escaped}"]`).forEach(n => n.remove());
+      if (articleId && onDeleteArticle) {
+        // Propagate to workspace — it removes article from ALL columns on ALL pages
+        onDeleteArticle(articleId);
       } else {
-        actionEl.closest<HTMLElement>('[data-flow-article="1"]')?.remove();
+        // Fallback: remove from this column only
+        if (articleId) {
+          const escaped = articleId.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+          root.querySelectorAll(`[data-article-id="${escaped}"]`).forEach(n => n.remove());
+        } else {
+          actionEl.closest<HTMLElement>('[data-flow-article="1"]')?.remove();
+        }
+        requestAnimationFrame(() => { if (root) applyAnchorWrap(root); });
+        syncHtml();
       }
-      requestAnimationFrame(() => { if (root) applyAnchorWrap(root); });
-      syncHtml();
     }
-  }, [disabled, syncHtml]);
+  }, [disabled, onDeleteArticle, syncHtml]);
 
   const processDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     if (disabled) return;
@@ -118,16 +125,8 @@ const ColumnFlowBody: React.FC<ColumnFlowBodyProps> = ({
     if (payload.illustrationId) {
       const ill = illustrations.find(i => i.id === payload.illustrationId);
       if (!ill) return;
-      if (isColumnMostlyEmpty(root)) {
-        insertAnchoredFigureAtPoint(root, ill.url, ill.caption || '', e.clientX, e.clientY);
-      } else {
-        insertHtmlAtPoint(
-          root,
-          buildObjectHtml(buildFloatedImageHtml(ill.url, ill.caption || ''), 'image', { includeObjectDelete: true }),
-          e.clientX,
-          e.clientY
-        );
-      }
+      // Always anchor — avoids flow-object nesting bugs and keeps text flowing around the image
+      insertAnchoredFigureAtPoint(root, ill.url, ill.caption || '', e.clientX, e.clientY);
       syncHtml();
       return;
     }
@@ -135,16 +134,7 @@ const ColumnFlowBody: React.FC<ColumnFlowBodyProps> = ({
     const imageFile = Array.from(e.dataTransfer.files).find(f => f.type.startsWith('image/'));
     if (imageFile) {
       const objectUrl = URL.createObjectURL(imageFile);
-      if (isColumnMostlyEmpty(root)) {
-        insertAnchoredFigureAtPoint(root, objectUrl, imageFile.name, e.clientX, e.clientY);
-      } else {
-        insertHtmlAtPoint(
-          root,
-          buildObjectHtml(buildFloatedImageHtml(objectUrl, imageFile.name), 'image', { includeObjectDelete: true }),
-          e.clientX,
-          e.clientY
-        );
-      }
+      insertAnchoredFigureAtPoint(root, objectUrl, imageFile.name, e.clientX, e.clientY);
       syncHtml();
     }
   }, [articles, disabled, illustrations, syncHtml]);
@@ -174,10 +164,6 @@ const ColumnFlowBody: React.FC<ColumnFlowBodyProps> = ({
   );
 };
 
-function isColumnMostlyEmpty(root: HTMLElement): boolean {
-  const textBlocks = Array.from(root.querySelectorAll('.flow-object:not(.flow-anchor-block)'));
-  return !textBlocks.some(el => (el.textContent || '').trim().length > 0);
-}
 
 function buildArticleInsertHtml(article: Article): string {
   const titleHtml = article.title ? `<h2>${escapeText(article.title)}</h2>` : '';

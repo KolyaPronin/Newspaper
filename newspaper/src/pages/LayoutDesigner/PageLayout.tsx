@@ -12,6 +12,7 @@ export interface PageLayoutProps {
   articles: Article[];
   illustrations?: Illustration[];
   onColumnHtmlChange: (columnIndex: number, html: string) => void;
+  onDeleteArticle?: (articleId: string) => void;
   interactionDisabled?: boolean;
   headerContent: string;
   onHeaderChange: (content: string) => void;
@@ -31,6 +32,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
   articles,
   illustrations = [],
   onColumnHtmlChange,
+  onDeleteArticle,
   interactionDisabled,
   layoutIllustrations = [],
   onDropIllustration,
@@ -144,6 +146,7 @@ const PageLayout: React.FC<PageLayoutProps> = ({
                 illustrations={illustrations}
                 disabled={interactionDisabled}
                 onHtmlChange={(html) => onColumnHtmlChange(colIndex, html)}
+                onDeleteArticle={onDeleteArticle}
               />
             </div>
           ))}

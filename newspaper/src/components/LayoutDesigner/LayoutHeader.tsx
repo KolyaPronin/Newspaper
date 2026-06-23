@@ -98,7 +98,7 @@ const LayoutHeader: React.FC<LayoutHeaderProps> = ({
         {/* Submit for review / status section */}
         {layoutStatus === 'in_review' ? (
           <span className="layout-status-badge layout-status-in-review">
-            🔍 На проверке у главреда
+            🔍 На проверке у главного редактора
           </span>
         ) : layoutStatus === 'published' ? (
           <span className="layout-status-badge layout-status-published">
@@ -118,7 +118,7 @@ const LayoutHeader: React.FC<LayoutHeaderProps> = ({
 
       {layoutStatus === 'draft' && reviewComment && (
         <div className="review-comment-block">
-          <div className="review-comment-label">Замечания главреда:</div>
+          <div className="review-comment-label">Замечания главного редактора:</div>
           <div className="review-comment-text">{reviewComment}</div>
         </div>
       )}

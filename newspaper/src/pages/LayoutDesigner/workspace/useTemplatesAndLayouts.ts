@@ -9,6 +9,8 @@ interface UseTemplatesAndLayoutsArgs {
   setPagesData: React.Dispatch<React.SetStateAction<Record<number, PageData>>>;
   setAutoSaveMessage: React.Dispatch<React.SetStateAction<string | null>>;
   setSaveError: React.Dispatch<React.SetStateAction<string | null>>;
+  issueId?: string | null;
+  totalPages?: number;
 }
 
 const isMongoObjectIdString = (value: string): boolean => /^[a-f\d]{24}$/i.test(value);
@@ -18,14 +20,17 @@ export function useTemplatesAndLayouts({
   setPagesData,
   setAutoSaveMessage,
   setSaveError,
+  issueId,
+  totalPages: totalPagesProp,
 }: UseTemplatesAndLayoutsArgs) {
+  const totalPages = totalPagesProp ?? TOTAL_PAGES;
   const [templates, setTemplates] = useState<PageTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<PageTemplate | null>(null);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [layoutsLoading, setLayoutsLoading] = useState(false);
 
-  const loadLayoutsForAllPages = useCallback(async (template: PageTemplate) => {
+  const loadLayoutsForAllPages = useCallback(async (template: PageTemplate, loadIssueId?: string | null) => {
     setLayoutsLoading(true);
     setSaveError(null);
     try {
@@ -33,11 +38,13 @@ export function useTemplatesAndLayouts({
         ? { templateId: template.id }
         : {};
 
+      const issueIdFilter = loadIssueId ? { issueId: loadIssueId } : {};
+
       const [coverLayouts, regularLayouts] = await Promise.all([
-        layoutAPI.getLayouts({ pageNumber: 1 }),
+        layoutAPI.getLayouts({ pageNumber: 1, ...issueIdFilter }),
         // Local fallback templates use non-ObjectId ids like "default_3col".
         // Passing those to Mongo-backed Layout.templateId triggers Cast errors server-side.
-        layoutAPI.getLayouts({ ...templateIdFilter }),
+        layoutAPI.getLayouts({ ...templateIdFilter, ...issueIdFilter }),
       ]);
 
       const allLayoutsRaw = [...coverLayouts, ...regularLayouts];
@@ -61,7 +68,7 @@ export function useTemplatesAndLayouts({
       const allLayouts = Array.from(layoutByPage.values());
       const newPagesData: Record<number, PageData> = {};
 
-      for (let pageNum = 1; pageNum <= TOTAL_PAGES; pageNum++) {
+      for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
         const pageLayout = allLayouts.find(l => l.pageNumber === pageNum);
         const pageTemplate = pageNum === 1 ? coverPageTemplate : template;
 
@@ -108,7 +115,7 @@ export function useTemplatesAndLayouts({
       setAutoSaveMessage(errorMessage);
 
       const newPagesData: Record<number, PageData> = {};
-      for (let pageNum = 1; pageNum <= TOTAL_PAGES; pageNum++) {
+      for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
         const pageTemplate = pageNum === 1 ? coverPageTemplate : template;
         newPagesData[pageNum] = {
           columns: buildEmptyColumns(pageTemplate),
@@ -123,33 +130,34 @@ export function useTemplatesAndLayouts({
     } finally {
       setLayoutsLoading(false);
     }
-  }, [buildEmptyColumns, setAutoSaveMessage, setPagesData, setSaveError]);
+  }, [buildEmptyColumns, setAutoSaveMessage, setPagesData, setSaveError, totalPages]);
 
-  const fetchTemplates = useCallback(async () => {
+  const fetchTemplates = useCallback(async (overrideIssueId?: string | null) => {
     setTemplatesLoading(true);
     setTemplatesError(null);
+    const effectiveIssueId = overrideIssueId !== undefined ? overrideIssueId : issueId;
     try {
       const fetchedTemplates = await templateAPI.getTemplates();
       if (fetchedTemplates.length === 0) {
         setTemplates([defaultPageTemplate]);
         setSelectedTemplate(defaultPageTemplate);
-        await loadLayoutsForAllPages(defaultPageTemplate);
+        await loadLayoutsForAllPages(defaultPageTemplate, effectiveIssueId);
       } else {
         setTemplates(fetchedTemplates);
         const template = fetchedTemplates[0];
         setSelectedTemplate(template);
-        await loadLayoutsForAllPages(template);
+        await loadLayoutsForAllPages(template, effectiveIssueId);
       }
     } catch (error) {
       const fallbackTemplate = defaultPageTemplate;
       setTemplates([fallbackTemplate]);
       setSelectedTemplate(fallbackTemplate);
-      await loadLayoutsForAllPages(fallbackTemplate);
+      await loadLayoutsForAllPages(fallbackTemplate, effectiveIssueId);
       setTemplatesError(error instanceof Error ? error.message : 'Не удалось загрузить шаблоны');
     } finally {
       setTemplatesLoading(false);
     }
-  }, [loadLayoutsForAllPages]);
+  }, [loadLayoutsForAllPages, issueId]);
 
   useEffect(() => {
     fetchTemplates();
@@ -159,15 +167,15 @@ export function useTemplatesAndLayouts({
     const next = templates.find(t => t.id === templateId);
     if (next) {
       setSelectedTemplate(next);
-      loadLayoutsForAllPages(next);
+      loadLayoutsForAllPages(next, issueId);
     }
-  }, [templates, loadLayoutsForAllPages]);
+  }, [templates, loadLayoutsForAllPages, issueId]);
 
   const handleReloadTemplate = useCallback(() => {
     if (selectedTemplate) {
-      loadLayoutsForAllPages(selectedTemplate);
+      loadLayoutsForAllPages(selectedTemplate, issueId);
     }
-  }, [selectedTemplate, loadLayoutsForAllPages]);
+  }, [selectedTemplate, loadLayoutsForAllPages, issueId]);
 
   return {
     templates,

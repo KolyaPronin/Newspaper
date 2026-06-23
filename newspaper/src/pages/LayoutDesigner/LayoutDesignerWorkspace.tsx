@@ -9,7 +9,7 @@ import LayoutArticlesSidebar from '../../components/LayoutDesigner/LayoutArticle
 import PageNavigation from '../../components/LayoutDesigner/PageNavigation';
 import { PageData } from './workspace/types';
 import { buildEmptyColumns as buildEmptyColumnsPure, initPageData as initPageDataPure } from './workspace/columns';
-import { getColumnHtml, setColumnHtmlInPageColumns, EMPTY_COLUMN_HTML } from './workspace/columnHtml/columnHtmlModel';
+import { getColumnHtml, setColumnHtmlInPageColumns, EMPTY_COLUMN_HTML, columnHtmlToContainers } from './workspace/columnHtml/columnHtmlModel';
 import { useIllustrationsAssets } from './workspace/useIllustrationsAssets';
 import { useTemplatesAndLayouts } from './workspace/useTemplatesAndLayouts';
 import { useLayoutAutoSave } from './workspace/useLayoutAutoSave';
@@ -18,18 +18,20 @@ import { useLayoutDesignerSlotActions } from './workspace/useLayoutDesignerSlotA
 import { useLayoutDesignerDragStart } from './workspace/useLayoutDesignerDragStart';
 import MyTasksPage from '../Tasks/MyTasksPage';
 import { useUnreadTasks } from '../../hooks/useUnreadTasks';
-import { layoutAPI, taskAPI, transformTask } from '../../utils/api';
+import { layoutAPI, taskAPI, transformTask, illustrationAPI, Illustration } from '../../utils/api';
 import { useAuth } from '../../contexts/AuthContexts';
+import { issueAPI } from '../../api/issues';
 
 const LayoutDesignerWorkspace: React.FC = () => {
   const { user } = useAuth();
   const { articles } = useArticles();
   const [layoutIssueId, setLayoutIssueId] = useState<string | null>(null);
+  const [issuePageCount, setIssuePageCount] = useState<number | null>(null);
+  const totalPages = issuePageCount ?? TOTAL_PAGES;
   const [activeView, setActiveView] = useState<'layout' | 'tasks'>('layout');
   const { unreadCount, markAllSeen } = useUnreadTasks();
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [newspaperTitle, setNewspaperTitle] = useState<string>('XPress');
-  // Данные для всех страниц
   const [pagesData, setPagesData] = useState<Record<number, PageData>>({});
   
   const [autoSaveMessage, setAutoSaveMessage] = useState<string | null>('Нет изменений');
@@ -41,11 +43,13 @@ const LayoutDesignerWorkspace: React.FC = () => {
     return buildEmptyColumnsPure(template);
   }, []);
 
-  const { templates, selectedTemplate, templatesLoading, templatesError, layoutsLoading, fetchTemplates, handleTemplateChange, handleReloadTemplate } = useTemplatesAndLayouts({
+  const { templates, selectedTemplate, templatesLoading, templatesError, layoutsLoading, fetchTemplates, handleTemplateChange, handleReloadTemplate, loadLayoutsForAllPages } = useTemplatesAndLayouts({
     buildEmptyColumns,
     setPagesData,
     setAutoSaveMessage,
     setSaveError,
+    issueId: layoutIssueId,
+    totalPages,
   });
 
   const getTemplateForPage = useCallback((pageNumber: number): PageTemplate => {
@@ -72,7 +76,60 @@ const LayoutDesignerWorkspace: React.FC = () => {
     [articles]
   );
 
+  // Collect all articleIds placed in any column on any page by scanning HTML content
+  const placedArticleIds = useMemo(() => {
+    const ids = new Set<string>();
+    const re = /data-article-id="([^"]+)"/g;
+    for (const pageData of Object.values(pagesData)) {
+      for (const colContainers of pageData.columns) {
+        for (const cont of colContainers) {
+          if (!cont.content || !cont.isFilled) continue;
+          re.lastIndex = 0;
+          let m: RegExpExecArray | null;
+          while ((m = re.exec(cont.content)) !== null) {
+            ids.add(m[1]);
+          }
+        }
+      }
+    }
+    return ids;
+  }, [pagesData]);
+
+  // Collect illustrationIds and adIds placed on any page via slots
+  const placedIllustrationIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const pageData of Object.values(pagesData)) {
+      for (const li of pageData.layoutIllustrations) {
+        ids.add(li.illustrationId);
+      }
+    }
+    return ids;
+  }, [pagesData]);
+
+  const placedAdIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const pageData of Object.values(pagesData)) {
+      for (const la of pageData.layoutAds) {
+        ids.add(la.illustrationId);
+      }
+    }
+    return ids;
+  }, [pagesData]);
+
+  // Articles not yet placed on any layout page
+  const sidebarArticles = useMemo(
+    () => approvedArticles.filter(a => !placedArticleIds.has(a.id)),
+    [approvedArticles, placedArticleIds]
+  );
+
   const { allIllustrations, allAds } = useIllustrationsAssets(approvedArticles);
+
+  // Extra illustrations uploaded directly from the cover page (not yet in the server list)
+  const [extraIllustrations, setExtraIllustrations] = useState<Illustration[]>([]);
+  const mergedIllustrations = useMemo(
+    () => [...allIllustrations, ...extraIllustrations],
+    [allIllustrations, extraIllustrations],
+  );
 
   const initPageData = useCallback((pageNum: number, template: PageTemplate): PageData => {
     return initPageDataPure(pageNum, template);
@@ -112,7 +169,7 @@ const LayoutDesignerWorkspace: React.FC = () => {
     const allBlocks: HTMLElement[] = [];
     const anchorsBySlot = new Map<string, HTMLElement[]>();
 
-    for (let p = startPage; p <= TOTAL_PAGES; p++) {
+    for (let p = startPage; p <= totalPages; p++) {
       const t = getTemplateForPage(p);
       const colCount = t.columns;
       const base = next[p] || initPageData(p, t);
@@ -146,7 +203,7 @@ const LayoutDesignerWorkspace: React.FC = () => {
     // 2. Distribute blocks across (page, col) slots in linear order
     let blockIdx = 0;
 
-    for (let p = startPage; p <= TOTAL_PAGES; p++) {
+    for (let p = startPage; p <= totalPages; p++) {
       const t = getTemplateForPage(p);
       const colCount = t.columns;
       const base = next[p] || initPageData(p, t);
@@ -185,7 +242,7 @@ const LayoutDesignerWorkspace: React.FC = () => {
     }
 
     return next;
-  }, [buildEmptyColumns, getTemplateForPage, initPageData]);
+  }, [buildEmptyColumns, getTemplateForPage, initPageData, totalPages]);
 
   const handleColumnHtmlChange = useCallback((colIndex: number, html: string) => {
     const livePageEl = document.querySelector<HTMLElement>('.page-layout');
@@ -212,12 +269,39 @@ const LayoutDesignerWorkspace: React.FC = () => {
             t.status !== 'done' &&
             t.status !== 'cancelled'
         );
-        setLayoutIssueId(layoutTask?.issueId ?? null);
+        const issueId = layoutTask?.issueId ?? null;
+        setLayoutIssueId(issueId);
+
+        if (issueId) {
+          try {
+            const issue = await issueAPI.getIssueById(issueId);
+            if (issue.pageCount && issue.pageCount > 0) {
+              setIssuePageCount(issue.pageCount);
+            }
+          } catch {
+            // pageCount remains null, falls back to TOTAL_PAGES
+          }
+        }
       } catch {
         setLayoutIssueId(null);
       }
     })();
   }, [user]);
+
+  // Reload layouts when issueId becomes known (initial load runs without issueId)
+  const prevIssueIdRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (prevIssueIdRef.current === undefined) {
+      prevIssueIdRef.current = layoutIssueId;
+      return;
+    }
+    if (prevIssueIdRef.current === layoutIssueId) return;
+    prevIssueIdRef.current = layoutIssueId;
+    if (selectedTemplate && layoutIssueId) {
+      skipAutoSaveRef.current = true;
+      void loadLayoutsForAllPages(selectedTemplate, layoutIssueId);
+    }
+  }, [layoutIssueId, selectedTemplate, loadLayoutsForAllPages]);
 
   useLayoutAutoSave({
     selectedTemplate,
@@ -267,7 +351,7 @@ const LayoutDesignerWorkspace: React.FC = () => {
   const bulkActionLoading = bulkActionLoadingFromHook;
 
   const { handleDropIllustration, handleDeleteIllustration, handleDropAd, handleDeleteAd } = useLayoutDesignerSlotActions({
-    allIllustrations,
+    allIllustrations: mergedIllustrations,
     allAds,
     currentPage,
     currentPageData,
@@ -277,9 +361,50 @@ const LayoutDesignerWorkspace: React.FC = () => {
 
   const { handleArticleDragStart, handleIllustrationDragStart, handleAdDragStart } = useLayoutDesignerDragStart();
 
+  // Upload a file directly to the cover illustration slot
+  const handleCoverImageUpload = useCallback(async (file: File) => {
+    try {
+      const uploaded = await illustrationAPI.upload({ file, kind: 'illustration' });
+      setExtraIllustrations(prev => [...prev, uploaded]);
+      // Place directly — don't use handleDropIllustration which does an async find in allIllustrations
+      updateCurrentPageData({
+        layoutIllustrations: [
+          ...currentPageData.layoutIllustrations.filter(
+            li => !(li.columnIndex === 0 && li.positionIndex === 0) && li.illustrationId !== uploaded.id
+          ),
+          { illustrationId: uploaded.id, columnIndex: 0, positionIndex: 0 },
+        ],
+      });
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Ошибка загрузки изображения');
+    }
+  }, [currentPageData.layoutIllustrations, setSaveError, updateCurrentPageData]);
+
   const handleHeaderChange = useCallback((content: string) => {
     void content;
   }, []);
+
+  // Delete an article from ALL columns on ALL pages
+  const handleDeleteArticle = useCallback((articleId: string) => {
+    const escaped = articleId.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    setPagesData(prev => {
+      const next = { ...prev };
+      for (const pageNumStr of Object.keys(next)) {
+        const pageNum = Number(pageNumStr);
+        const pageData = next[pageNum];
+        const newCols = pageData.columns.map((colContainers, colIdx) => {
+          const currentHtml = getColumnHtml(pageData.columns, colIdx);
+          const div = document.createElement('div');
+          div.innerHTML = currentHtml;
+          div.querySelectorAll(`[data-article-id="${escaped}"]`).forEach(n => n.remove());
+          const newHtml = div.innerHTML.trim() || EMPTY_COLUMN_HTML;
+          return columnHtmlToContainers(newHtml, colIdx);
+        });
+        next[pageNum] = { ...pageData, columns: newCols };
+      }
+      return next;
+    });
+  }, [setPagesData]);
 
   // Compute issue-level status: in_review if any page is in_review, published if all are published
   const issueStatus = useMemo((): 'draft' | 'in_review' | 'published' | undefined => {
@@ -294,12 +419,12 @@ const LayoutDesignerWorkspace: React.FC = () => {
 
   // reviewComment from any page that has one (most recent)
   const issueReviewComment = useMemo((): string | null => {
-    for (let p = 1; p <= TOTAL_PAGES; p++) {
+    for (let p = 1; p <= totalPages; p++) {
       const c = pagesData[p]?.reviewComment;
       if (c) return c;
     }
     return null;
-  }, [pagesData]);
+  }, [pagesData, totalPages]);
 
   const hasDraftPages = useMemo(
     () => Object.values(pagesData).some(
@@ -322,7 +447,10 @@ const LayoutDesignerWorkspace: React.FC = () => {
     try {
       await Promise.all(
         savedPages.map(({ layoutId }) =>
-          layoutAPI.updateLayout(layoutId, { status: 'in_review' }),
+          layoutAPI.updateLayout(layoutId, {
+            status: 'in_review',
+            ...(layoutIssueId ? { issueId: layoutIssueId } : {}),
+          }),
         ),
       );
       setPagesData((prev) => {
@@ -334,13 +462,13 @@ const LayoutDesignerWorkspace: React.FC = () => {
         });
         return next;
       });
-      setAutoSaveMessage('Весь выпуск отправлен главреду на проверку');
+      setAutoSaveMessage('Весь выпуск отправлен главному редактору на проверку');
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Ошибка отправки на проверку');
     } finally {
       setSubmitForReviewLoading(false);
     }
-  }, [pagesData, setAutoSaveMessage, setSaveError]);
+  }, [layoutIssueId, pagesData, setAutoSaveMessage, setSaveError]);
 
   const currentTemplate = getTemplateForPage(currentPage);
 
@@ -417,9 +545,9 @@ const LayoutDesignerWorkspace: React.FC = () => {
         <>
           <div className="layout-workspace-content">
             <LayoutArticlesSidebar
-              approvedArticles={approvedArticles}
-              allIllustrations={allIllustrations.filter(i => i.kind !== 'ad')}
-              allAds={allAds}
+              approvedArticles={sidebarArticles}
+              allIllustrations={allIllustrations.filter(i => i.kind !== 'ad' && !placedIllustrationIds.has(i.id))}
+              allAds={allAds.filter(a => !placedAdIds.has(a.id))}
               onArticleDragStart={handleArticleDragStart}
               onIllustrationDragStart={handleIllustrationDragStart}
               onAdDragStart={handleAdDragStart}
@@ -431,8 +559,12 @@ const LayoutDesignerWorkspace: React.FC = () => {
                     template={currentTemplate}
                     newspaperTitle={newspaperTitle}
                     onNewspaperTitleChange={setNewspaperTitle}
-                    interactionDisabled={layoutsLoading || templatesLoading}
-                    illustrations={allIllustrations}
+                    interactionDisabled={
+                      layoutsLoading || templatesLoading ||
+                      currentPageData.layoutStatus === 'in_review' ||
+                      currentPageData.layoutStatus === 'published'
+                    }
+                    illustrations={mergedIllustrations}
                     layoutIllustrations={currentPageData.layoutIllustrations}
                     onDropIllustration={handleDropIllustration}
                     onDeleteIllustration={handleDeleteIllustration}
@@ -440,6 +572,7 @@ const LayoutDesignerWorkspace: React.FC = () => {
                     layoutAds={currentPageData.layoutAds}
                     onDropAd={handleDropAd}
                     onDeleteAd={handleDeleteAd}
+                    onUploadAndPlace={handleCoverImageUpload}
                   />
                 ) : (
                   <PageLayout
@@ -447,11 +580,16 @@ const LayoutDesignerWorkspace: React.FC = () => {
                     pageNumber={currentPage}
                     columns={currentPageData.columns}
                     articles={approvedArticles}
-                    interactionDisabled={layoutsLoading || templatesLoading}
+                    interactionDisabled={
+                      layoutsLoading || templatesLoading ||
+                      currentPageData.layoutStatus === 'in_review' ||
+                      currentPageData.layoutStatus === 'published'
+                    }
                     onColumnHtmlChange={handleColumnHtmlChange}
+                    onDeleteArticle={handleDeleteArticle}
                     headerContent={currentPageData.headerContent}
                     onHeaderChange={handleHeaderChange}
-                    illustrations={allIllustrations}
+                    illustrations={mergedIllustrations}
                     layoutIllustrations={currentPageData.layoutIllustrations}
                     onDropIllustration={handleDropIllustration}
                     onDeleteIllustration={handleDeleteIllustration}
@@ -459,7 +597,7 @@ const LayoutDesignerWorkspace: React.FC = () => {
                 )}
                 <PageNavigation
                   currentPage={currentPage}
-                  totalPages={TOTAL_PAGES}
+                  totalPages={totalPages}
                   onPageChange={handlePageChange}
                 />
               </div>

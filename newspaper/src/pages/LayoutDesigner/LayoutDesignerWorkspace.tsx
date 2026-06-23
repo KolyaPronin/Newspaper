@@ -705,6 +705,10 @@ const LayoutDesignerWorkspace: React.FC = () => {
                     layoutIllustrations={currentPageData.layoutIllustrations}
                     onDropIllustration={handleDropIllustration}
                     onDeleteIllustration={handleDeleteIllustration}
+                    ads={allAds}
+                    layoutAds={currentPageData.layoutAds}
+                    onDropAd={handleDropAd}
+                    onDeleteAd={handleDeleteAd}
                   />
                 )}
                 <PageNavigation

@@ -17,6 +17,7 @@ export function useLayoutDesignerDragStart() {
   }, []);
 
   const handleAdDragStart = useCallback((e: React.DragEvent, illustrationId: string) => {
+    e.dataTransfer.effectAllowed = 'copy';
     e.dataTransfer.setData('illustrationId', illustrationId);
     e.dataTransfer.setData('assetKind', 'ad');
     e.dataTransfer.setData('text/plain', illustrationId);

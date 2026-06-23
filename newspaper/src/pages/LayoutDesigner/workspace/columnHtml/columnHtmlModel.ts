@@ -4,6 +4,16 @@ import { buildFloatedImageHtml } from './insertInColumn';
 
 export const EMPTY_COLUMN_HTML = '<p><br></p>';
 
+/** Placeholder paragraph left in an otherwise empty column. */
+export function isEmptyPlaceholderElement(el: HTMLElement): boolean {
+  if (el.classList.contains('flow-object') || el.classList.contains('flow-anchor-block')) {
+    return false;
+  }
+  if (el.tagName.toLowerCase() !== 'p') return false;
+  const normalized = el.innerHTML.trim().toLowerCase().replace(/\s+/g, '');
+  return normalized === '' || normalized === '<br>' || normalized === '<br/>';
+}
+
 export function columnHtmlToContainers(html: string, columnIndex: number): ColumnContainer[] {
   const normalized = html.trim() || EMPTY_COLUMN_HTML;
   return [

@@ -126,7 +126,7 @@ const ColumnFlowBody: React.FC<ColumnFlowBodyProps> = ({
       const ill = illustrations.find(i => i.id === payload.illustrationId);
       if (!ill) return;
       // Always anchor — avoids flow-object nesting bugs and keeps text flowing around the image
-      insertAnchoredFigureAtPoint(root, ill.url, ill.caption || '', e.clientX, e.clientY);
+      insertAnchoredFigureAtPoint(root, ill.url, ill.caption || '', e.clientX, e.clientY, ill.id);
       syncHtml();
       return;
     }

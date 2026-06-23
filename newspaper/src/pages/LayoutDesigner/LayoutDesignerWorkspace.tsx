@@ -9,7 +9,7 @@ import LayoutArticlesSidebar from '../../components/LayoutDesigner/LayoutArticle
 import PageNavigation from '../../components/LayoutDesigner/PageNavigation';
 import { PageData } from './workspace/types';
 import { buildEmptyColumns as buildEmptyColumnsPure, initPageData as initPageDataPure } from './workspace/columns';
-import { getColumnHtml, setColumnHtmlInPageColumns, EMPTY_COLUMN_HTML, columnHtmlToContainers } from './workspace/columnHtml/columnHtmlModel';
+import { getColumnHtml, setColumnHtmlInPageColumns, EMPTY_COLUMN_HTML, columnHtmlToContainers, isEmptyPlaceholderElement } from './workspace/columnHtml/columnHtmlModel';
 import { useIllustrationsAssets } from './workspace/useIllustrationsAssets';
 import { useTemplatesAndLayouts } from './workspace/useTemplatesAndLayouts';
 import { useLayoutAutoSave } from './workspace/useLayoutAutoSave';
@@ -18,9 +18,106 @@ import { useLayoutDesignerSlotActions } from './workspace/useLayoutDesignerSlotA
 import { useLayoutDesignerDragStart } from './workspace/useLayoutDesignerDragStart';
 import MyTasksPage from '../Tasks/MyTasksPage';
 import { useUnreadTasks } from '../../hooks/useUnreadTasks';
-import { layoutAPI, taskAPI, transformTask, illustrationAPI, Illustration } from '../../utils/api';
+import { layoutAPI, taskAPI, transformTask } from '../../utils/api';
 import { useAuth } from '../../contexts/AuthContexts';
 import { issueAPI } from '../../api/issues';
+
+// ─── Paragraph-level block splitting for pagination ──────────────────────────
+
+/**
+ * Collects HTML tokens from a paragraph element.
+ * Text nodes are split at word boundaries; inline elements are kept whole.
+ */
+function extractParagraphTokens(p: HTMLElement): string[] {
+  const tokens: string[] = [];
+  p.childNodes.forEach(child => {
+    if (child.nodeType === Node.TEXT_NODE) {
+      const text = child.textContent ?? '';
+      const parts = text.match(/\S+\s*|\s+/g);
+      if (parts) {
+        for (const part of parts) {
+          tokens.push(
+            part
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;'),
+          );
+        }
+      }
+    } else if (child.nodeType === Node.ELEMENT_NODE) {
+      tokens.push((child as Element).outerHTML);
+    }
+  });
+  return tokens;
+}
+
+/**
+ * Tries to split a `.flow-object` block at a word boundary so that the first
+ * part fills the remaining column space and the rest goes to the next column.
+ * Returns null if the block cannot or should not be split.
+ *
+ * @param block      – the overflow block from allBlocks
+ * @param body       – measurement div that already contains the preceding blocks
+ * @param colHeightPx – available column height
+ */
+function trySplitFlowBlock(
+  block: HTMLElement,
+  body: HTMLElement,
+  colHeightPx: number,
+): { first: HTMLElement; rest: HTMLElement } | null {
+  const usedHeight = body.scrollHeight;
+  const remaining = colHeightPx + 4 - usedHeight;
+  if (remaining < 20) return null; // not enough room for even one line
+
+  if (block.classList.contains('flow-anchor-block')) return null;
+
+  const innerP = block.querySelector<HTMLElement>(':scope > p');
+  if (!innerP) return null; // headings, etc. — don't split
+
+  const tokens = extractParagraphTokens(innerP);
+  if (tokens.length < 2) return null;
+
+  const restContent = tokens.join('').trim();
+  if (!restContent) return null;
+
+  // Binary search: find max prefix of tokens that fits within colHeightPx
+  let lo = 1, hi = tokens.length - 1, bestSplit = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const testEl = block.cloneNode(false) as HTMLElement;
+    const testP = document.createElement('p');
+    testP.innerHTML = tokens.slice(0, mid).join('');
+    testEl.appendChild(testP);
+    body.appendChild(testEl);
+    const fits = body.scrollHeight <= colHeightPx + 4;
+    body.removeChild(testEl);
+    if (fits) { bestSplit = mid; lo = mid + 1; }
+    else        { hi = mid - 1; }
+  }
+
+  if (bestSplit === 0 || bestSplit >= tokens.length) return null;
+
+  const firstContent = tokens.slice(0, bestSplit).join('').trim();
+  const remainContent = tokens.slice(bestSplit).join('').trim();
+  if (!firstContent || !remainContent) return null;
+
+  // First part: keep delete buttons from the original block
+  const firstWrapper = block.cloneNode(false) as HTMLElement;
+  block.querySelectorAll<HTMLElement>(':scope > .flow-delete-btn').forEach(btn => {
+    firstWrapper.appendChild(btn.cloneNode(true) as HTMLElement);
+  });
+  const firstP = document.createElement('p');
+  firstP.innerHTML = tokens.slice(0, bestSplit).join('');
+  firstWrapper.appendChild(firstP);
+
+  // Rest part: same attributes (data-article-id etc.) but no delete buttons
+  const restWrapper = block.cloneNode(false) as HTMLElement;
+  const restP = document.createElement('p');
+  restP.innerHTML = tokens.slice(bestSplit).join('');
+  restWrapper.appendChild(restP);
+
+  return { first: firstWrapper, rest: restWrapper };
+}
 
 const LayoutDesignerWorkspace: React.FC = () => {
   const { user } = useAuth();
@@ -76,6 +173,18 @@ const LayoutDesignerWorkspace: React.FC = () => {
     [articles]
   );
 
+  const { allIllustrations, allAds } = useIllustrationsAssets(approvedArticles);
+
+  const illustrationUrlToId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const ill of allIllustrations) {
+      if (ill.kind !== 'ad') {
+        map.set(ill.url, ill.id);
+      }
+    }
+    return map;
+  }, [allIllustrations]);
+
   // Collect all articleIds placed in any column on any page by scanning HTML content
   const placedArticleIds = useMemo(() => {
     const ids = new Set<string>();
@@ -95,16 +204,39 @@ const LayoutDesignerWorkspace: React.FC = () => {
     return ids;
   }, [pagesData]);
 
-  // Collect illustrationIds and adIds placed on any page via slots
+  // Collect illustrationIds placed on any page via slots, column containers, or column HTML
   const placedIllustrationIds = useMemo(() => {
     const ids = new Set<string>();
+    const reDataId = /data-illustration-id="([^"]+)"/g;
+    const reInlineImgSrc = /src="([^"]+)"[^>]*class="column-inline-img"/g;
+
     for (const pageData of Object.values(pagesData)) {
       for (const li of pageData.layoutIllustrations) {
         ids.add(li.illustrationId);
       }
+      for (const colContainers of pageData.columns) {
+        for (const cont of colContainers) {
+          if (cont.isFilled && cont.kind === 'illustration' && cont.illustrationId) {
+            ids.add(cont.illustrationId);
+          }
+          if (!cont.content) continue;
+
+          reDataId.lastIndex = 0;
+          let m: RegExpExecArray | null;
+          while ((m = reDataId.exec(cont.content)) !== null) {
+            ids.add(m[1]);
+          }
+
+          reInlineImgSrc.lastIndex = 0;
+          while ((m = reInlineImgSrc.exec(cont.content)) !== null) {
+            const id = illustrationUrlToId.get(m[1]);
+            if (id) ids.add(id);
+          }
+        }
+      }
     }
     return ids;
-  }, [pagesData]);
+  }, [pagesData, illustrationUrlToId]);
 
   const placedAdIds = useMemo(() => {
     const ids = new Set<string>();
@@ -120,15 +252,6 @@ const LayoutDesignerWorkspace: React.FC = () => {
   const sidebarArticles = useMemo(
     () => approvedArticles.filter(a => !placedArticleIds.has(a.id)),
     [approvedArticles, placedArticleIds]
-  );
-
-  const { allIllustrations, allAds } = useIllustrationsAssets(approvedArticles);
-
-  // Extra illustrations uploaded directly from the cover page (not yet in the server list)
-  const [extraIllustrations, setExtraIllustrations] = useState<Illustration[]>([]);
-  const mergedIllustrations = useMemo(
-    () => [...allIllustrations, ...extraIllustrations],
-    [allIllustrations, extraIllustrations],
   );
 
   const initPageData = useCallback((pageNum: number, template: PageTemplate): PageData => {
@@ -188,7 +311,7 @@ const LayoutDesignerWorkspace: React.FC = () => {
           if (!(child instanceof HTMLElement)) return;
           if (child.classList.contains('flow-anchor-block')) {
             anchors.push(child.cloneNode(true) as HTMLElement);
-          } else {
+          } else if (!isEmptyPlaceholderElement(child)) {
             allBlocks.push(child);
           }
         });
@@ -214,11 +337,14 @@ const LayoutDesignerWorkspace: React.FC = () => {
       for (let c = cStart; c < colCount; c++) {
         host.innerHTML = '';
         const body = document.createElement('div');
+        // Apply real column class so CSS rules (paragraph margins, hyphens, justify)
+        // match the actual rendering. Override layout-blocking properties.
+        body.className = 'col-flow-body';
+        body.style.position = 'static';
+        body.style.height = 'auto';
+        body.style.overflow = 'visible';
+        body.style.width = `${colWidthPx}px`;
         body.style.minHeight = '0';
-        body.style.lineHeight = '1.45';
-        body.style.fontSize = '14px';
-        body.style.wordBreak = 'break-word';
-        body.style.overflowWrap = 'break-word';
         host.appendChild(body);
 
         while (blockIdx < allBlocks.length) {
@@ -226,6 +352,12 @@ const LayoutDesignerWorkspace: React.FC = () => {
           body.appendChild(node);
           if (body.scrollHeight > colHeightPx + 4) {
             body.removeChild(node);
+            // Try word-level split so remaining column space is used
+            const split = trySplitFlowBlock(allBlocks[blockIdx], body, colHeightPx);
+            if (split) {
+              body.appendChild(split.first);
+              allBlocks[blockIdx] = split.rest; // rest goes to next column
+            }
             break;
           }
           blockIdx++;
@@ -351,7 +483,7 @@ const LayoutDesignerWorkspace: React.FC = () => {
   const bulkActionLoading = bulkActionLoadingFromHook;
 
   const { handleDropIllustration, handleDeleteIllustration, handleDropAd, handleDeleteAd } = useLayoutDesignerSlotActions({
-    allIllustrations: mergedIllustrations,
+    allIllustrations,
     allAds,
     currentPage,
     currentPageData,
@@ -360,25 +492,6 @@ const LayoutDesignerWorkspace: React.FC = () => {
   });
 
   const { handleArticleDragStart, handleIllustrationDragStart, handleAdDragStart } = useLayoutDesignerDragStart();
-
-  // Upload a file directly to the cover illustration slot
-  const handleCoverImageUpload = useCallback(async (file: File) => {
-    try {
-      const uploaded = await illustrationAPI.upload({ file, kind: 'illustration' });
-      setExtraIllustrations(prev => [...prev, uploaded]);
-      // Place directly — don't use handleDropIllustration which does an async find in allIllustrations
-      updateCurrentPageData({
-        layoutIllustrations: [
-          ...currentPageData.layoutIllustrations.filter(
-            li => !(li.columnIndex === 0 && li.positionIndex === 0) && li.illustrationId !== uploaded.id
-          ),
-          { illustrationId: uploaded.id, columnIndex: 0, positionIndex: 0 },
-        ],
-      });
-    } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Ошибка загрузки изображения');
-    }
-  }, [currentPageData.layoutIllustrations, setSaveError, updateCurrentPageData]);
 
   const handleHeaderChange = useCallback((content: string) => {
     void content;
@@ -564,7 +677,7 @@ const LayoutDesignerWorkspace: React.FC = () => {
                       currentPageData.layoutStatus === 'in_review' ||
                       currentPageData.layoutStatus === 'published'
                     }
-                    illustrations={mergedIllustrations}
+                    illustrations={allIllustrations}
                     layoutIllustrations={currentPageData.layoutIllustrations}
                     onDropIllustration={handleDropIllustration}
                     onDeleteIllustration={handleDeleteIllustration}
@@ -572,7 +685,6 @@ const LayoutDesignerWorkspace: React.FC = () => {
                     layoutAds={currentPageData.layoutAds}
                     onDropAd={handleDropAd}
                     onDeleteAd={handleDeleteAd}
-                    onUploadAndPlace={handleCoverImageUpload}
                   />
                 ) : (
                   <PageLayout
@@ -589,7 +701,7 @@ const LayoutDesignerWorkspace: React.FC = () => {
                     onDeleteArticle={handleDeleteArticle}
                     headerContent={currentPageData.headerContent}
                     onHeaderChange={handleHeaderChange}
-                    illustrations={mergedIllustrations}
+                    illustrations={allIllustrations}
                     layoutIllustrations={currentPageData.layoutIllustrations}
                     onDropIllustration={handleDropIllustration}
                     onDeleteIllustration={handleDeleteIllustration}

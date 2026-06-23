@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React from 'react';
 import { PageTemplate, LayoutIllustration, LayoutAd } from '../../types/PageTemplate';
 import { Illustration } from '../../utils/api';
 
@@ -11,7 +11,6 @@ export interface CoverPageProps {
   layoutIllustrations?: LayoutIllustration[];
   onDropIllustration?: (illustrationId: string, columnIndex: number, positionIndex: number) => void;
   onDeleteIllustration?: (columnIndex: number, positionIndex: number) => void;
-  onUploadAndPlace?: (file: File) => Promise<void>;
 
   ads?: Illustration[];
   layoutAds?: LayoutAd[];
@@ -28,27 +27,11 @@ const CoverPage: React.FC<CoverPageProps> = ({
   layoutIllustrations = [],
   onDropIllustration,
   onDeleteIllustration,
-  onUploadAndPlace,
   ads = [],
   layoutAds = [],
   onDropAd,
   onDeleteAd,
 }) => {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !onUploadAndPlace) return;
-    setUploading(true);
-    try {
-      await onUploadAndPlace(file);
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-
   const parseDragPayload = (e: React.DragEvent): any | null => {
     try {
       const raw = e.dataTransfer.getData('application/x-newspaper-dnd') || e.dataTransfer.getData('text/plain');
@@ -102,7 +85,7 @@ const CoverPage: React.FC<CoverPageProps> = ({
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = interactionDisabled ? 'none' : 'move';
+    e.dataTransfer.dropEffect = interactionDisabled ? 'none' : 'copy';
   };
 
   const getIllustrationForSlot = (columnIndex: number, positionIndex: number): Illustration | null => {
@@ -174,27 +157,8 @@ const CoverPage: React.FC<CoverPageProps> = ({
                     ) : (
                       <div className="cover-slot-empty">
                         <span className="cover-slot-hint">
-                          {uploading ? 'Загрузка...' : 'Перетащите изображение из боковой панели'}
+                          Перетащите изображение из боковой панели
                         </span>
-                        {onUploadAndPlace && !interactionDisabled && !uploading && (
-                          <>
-                            <span className="cover-slot-or">или</span>
-                            <button
-                              type="button"
-                              className="btn btn-secondary cover-upload-btn"
-                              onClick={() => fileInputRef.current?.click()}
-                            >
-                              Загрузить файл
-                            </button>
-                            <input
-                              ref={fileInputRef}
-                              type="file"
-                              accept="image/*"
-                              style={{ display: 'none' }}
-                              onChange={handleFileChange}
-                            />
-                          </>
-                        )}
                       </div>
                     )}
                   </div>

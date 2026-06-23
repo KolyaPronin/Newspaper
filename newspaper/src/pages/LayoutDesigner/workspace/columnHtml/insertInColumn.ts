@@ -1,3 +1,5 @@
+import { isEmptyPlaceholderElement } from './columnHtmlModel';
+
 const FLOW_BLOCK_TAGS = new Set([
   'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'ul', 'ol',
 ]);
@@ -10,16 +12,32 @@ export function insertHtmlAtPoint(
 ): void {
   const fragment = htmlToFragment(html);
   const lastInserted = fragment.lastChild;
+  const rootRect = root.getBoundingClientRect();
+
+  if (shouldInsertAtColumnStart(root, clientY, rootRect)) {
+    removeEmptyPlaceholders(root);
+    root.insertBefore(fragment, root.firstChild);
+    placeCaretAfter(lastInserted ?? root.lastChild);
+    return;
+  }
 
   const range = getRangeAtPoint(clientX, clientY, root);
-  if (range && isDropPointConsistentWithRange(range, clientX, clientY)) {
+  const rangeBlock = range ? getContainingFlowBlock(range.startContainer, root) : null;
+  const canUseRange =
+    range &&
+    isDropPointConsistentWithRange(range, clientX, clientY) &&
+    rangeBlock &&
+    !isEmptyPlaceholderElement(rangeBlock) &&
+    !fragmentHasFlowObjects(fragment);
+
+  if (canUseRange && range) {
     range.deleteContents();
     range.insertNode(fragment);
     placeCaretAfter(lastInserted);
     return;
   }
 
-  insertFragmentAtVerticalPoint(root, fragment, clientY);
+  insertFragmentAtVerticalPoint(root, fragment, clientY, rootRect);
   placeCaretAfter(lastInserted ?? root.lastChild);
 }
 
@@ -132,22 +150,103 @@ function insertFigureAtVerticalPoint(root: HTMLElement, figure: HTMLElement, cli
   placeCaretAtStart(getOrCreateAfterParagraph(figure));
 }
 
-function insertFragmentAtVerticalPoint(root: HTMLElement, fragment: DocumentFragment, clientY: number): void {
+function insertFragmentAtVerticalPoint(
+  root: HTMLElement,
+  fragment: DocumentFragment,
+  clientY: number,
+  rootRect?: DOMRect,
+): void {
+  removeEmptyPlaceholders(root);
+
+  const rect = rootRect ?? root.getBoundingClientRect();
+  const relativeY = clientY - rect.top;
   const blocks = getFlowBlocks(root);
+
   if (blocks.length === 0) {
     root.appendChild(fragment);
     return;
   }
 
-  for (const block of blocks) {
-    const top = block.getBoundingClientRect().top;
-    if (top > clientY - 4) {
+  const firstRect = blocks[0].getBoundingClientRect();
+  const firstTop = firstRect.top - rect.top;
+  if (relativeY <= firstTop + 4) {
+    root.insertBefore(fragment, blocks[0]);
+    return;
+  }
+
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    const blockRect = block.getBoundingClientRect();
+    const top = blockRect.top - rect.top;
+    const bottom = blockRect.bottom - rect.top;
+
+    if (relativeY < top) {
       root.insertBefore(fragment, block);
+      return;
+    }
+
+    if (relativeY >= top && relativeY <= bottom) {
+      if (relativeY < top + blockRect.height / 2) {
+        root.insertBefore(fragment, block);
+      } else {
+        insertFragmentAfter(root, fragment, block);
+      }
       return;
     }
   }
 
   root.appendChild(fragment);
+}
+
+function insertFragmentAfter(root: HTMLElement, fragment: DocumentFragment, block: HTMLElement): void {
+  const next = block.nextSibling;
+  if (next) {
+    root.insertBefore(fragment, next);
+  } else {
+    root.appendChild(fragment);
+  }
+}
+
+function shouldInsertAtColumnStart(root: HTMLElement, clientY: number, rootRect: DOMRect): boolean {
+  if (isColumnEffectivelyEmpty(root)) return true;
+
+  const relativeY = clientY - rootRect.top;
+  const blocks = getFlowBlocks(root);
+  if (blocks.length === 0) return relativeY <= 12;
+
+  const firstRect = blocks[0].getBoundingClientRect();
+  const firstTop = firstRect.top - rootRect.top;
+  if (relativeY <= firstTop + 4) return true;
+  if (relativeY <= firstTop + firstRect.height * 0.25) return true;
+
+  return false;
+}
+
+function isColumnEffectivelyEmpty(root: HTMLElement): boolean {
+  for (const child of Array.from(root.children)) {
+    if (!(child instanceof HTMLElement)) continue;
+    if (child.classList.contains('flow-anchor-block')) continue;
+    if (isEmptyPlaceholderElement(child)) continue;
+    return false;
+  }
+  return true;
+}
+
+function removeEmptyPlaceholders(root: HTMLElement): void {
+  Array.from(root.children).forEach(child => {
+    if (child instanceof HTMLElement && isEmptyPlaceholderElement(child)) {
+      child.remove();
+    }
+  });
+}
+
+function fragmentHasFlowObjects(fragment: DocumentFragment): boolean {
+  for (const node of Array.from(fragment.childNodes)) {
+    if (node instanceof HTMLElement && node.classList.contains('flow-object')) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function ensureWrapParagraphAfter(figure: HTMLElement): void {
@@ -219,7 +318,7 @@ function getFlowBlocks(root: HTMLElement): HTMLElement[] {
   root.childNodes.forEach(node => {
     if (node.nodeType !== Node.ELEMENT_NODE) return;
     const el = node as HTMLElement;
-    if (isFlowBlockElement(el)) {
+    if (el.classList.contains('flow-object') || isFlowBlockElement(el)) {
       blocks.push(el);
     }
   });
@@ -311,13 +410,34 @@ export function insertAnchoredFigureAtPoint(
   url: string,
   alt: string,
   _clientX: number,
-  clientY: number
+  clientY: number,
+  illustrationId?: string
 ): void {
   const rootRect = root.getBoundingClientRect();
-  const anchorTopPx = Math.max(0, Math.round(clientY - rootRect.top));
+  let anchorTopPx = Math.max(0, Math.round(clientY - rootRect.top));
+
+  // Snap to the bottom of whichever paragraph contains the drop point.
+  // This prevents the entire paragraph block from being pushed below the image,
+  // which would create a large empty gap above it.
+  const paragraphs = Array.from(
+    root.querySelectorAll<HTMLElement>('p, h1, h2, h3, h4, h5, h6'),
+  ).filter(el => !el.closest('.flow-anchor-block'));
+
+  for (const p of paragraphs) {
+    const pRect = p.getBoundingClientRect();
+    const pTopRel = pRect.top - rootRect.top;
+    const pBottomRel = pRect.bottom - rootRect.top;
+    if (anchorTopPx >= pTopRel - 2 && anchorTopPx < pBottomRel + 2) {
+      anchorTopPx = Math.ceil(pBottomRel);
+      break;
+    }
+  }
   const safeUrl = escapeAttr(url);
   const safeAlt = escapeAttr(alt);
   const safeCaption = escapeHtmlText(alt);
+  const illustrationIdAttr = illustrationId
+    ? ` data-illustration-id="${escapeAttr(illustrationId)}"`
+    : '';
 
   const figureHtml =
     `<figure class="column-inline-figure col-anchored-figure" contenteditable="false">` +
@@ -326,7 +446,7 @@ export function insertAnchoredFigureAtPoint(
     `</figure>`;
 
   const html =
-    `<div class="flow-object flow-anchor-block" data-flow-object="1" data-kind="anchor" style="top:${anchorTopPx}px">` +
+    `<div class="flow-object flow-anchor-block" data-flow-object="1" data-kind="anchor" style="top:${anchorTopPx}px"${illustrationIdAttr}>` +
     `<button type="button" class="flow-delete-btn flow-delete-object" data-action="delete-object" title="Удалить иллюстрацию">✕</button>` +
     figureHtml +
     `</div>`;

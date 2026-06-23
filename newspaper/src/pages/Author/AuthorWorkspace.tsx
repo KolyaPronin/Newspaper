@@ -1,8 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import AuthorEditor from './AuthorEditor';
 import { useArticles } from '../../contexts/ArticleContext';
 import { useAuth } from '../../contexts/AuthContexts';
 import { Article } from '../../types/Article';
+import MyTasksPage from '../Tasks/MyTasksPage';
+import { useUnreadTasks } from '../../hooks/useUnreadTasks';
 
 const formatStatus = (status: Article['status']) => {
   switch (status) {
@@ -23,7 +25,9 @@ const formatStatus = (status: Article['status']) => {
 
 const AuthorWorkspace: React.FC = () => {
   const { user } = useAuth();
-  const { articles, currentArticle, setCurrentArticle } = useArticles();
+  const { articles, currentArticle, setCurrentArticle, loadArticle, loading, error } = useArticles();
+  const [activeView, setActiveView] = useState<'articles' | 'tasks'>('articles');
+  const { unreadCount, markAllSeen } = useUnreadTasks();
 
   const drafts = useMemo(
     () => articles.filter(a => a.authorId === user?.id && a.status === 'draft'),
@@ -31,14 +35,7 @@ const AuthorWorkspace: React.FC = () => {
   );
 
   const needsRevision = useMemo(() => {
-    const filtered = articles.filter(a => a.authorId === user?.id && a.status === 'needs_revision');
-    console.log('Author needsRevision filter:', {
-      userId: user?.id,
-      totalArticles: articles.length,
-      filteredCount: filtered.length,
-      allArticles: articles.map(a => ({ id: a.id, authorId: a.authorId, status: a.status }))
-    });
-    return filtered;
+    return articles.filter(a => a.authorId === user?.id && a.status === 'needs_revision');
   }, [articles, user?.id]);
 
   const inReview = useMemo(
@@ -66,6 +63,21 @@ const AuthorWorkspace: React.FC = () => {
 
   const handleSelectArticle = (article: Article) => {
     setCurrentArticle(article);
+  };
+
+  const handleOpenArticleFromTask = async (articleId: string) => {
+    const cached = articles.find((a) => a.id === articleId);
+    if (cached) {
+      setCurrentArticle(cached);
+      setActiveView('articles');
+      return;
+    }
+    const article = await loadArticle(articleId);
+    if (!article) {
+      throw new Error('Статья не найдена');
+    }
+    setCurrentArticle(article);
+    setActiveView('articles');
   };
 
   const renderSection = (title: string, list: Article[], emptyMessage: string, selectable = true) => (
@@ -105,25 +117,67 @@ const AuthorWorkspace: React.FC = () => {
     <div className="author-workspace">
       <div className="workspace-header">
         <div>
-          <h1>Мои статьи</h1>
-          <p>Создавайте новые материалы или дорабатывайте возвращенные черновики.</p>
+          <h1>{activeView === 'articles' ? 'Мои статьи' : 'Мои задачи'}</h1>
+          <p>{activeView === 'articles'
+            ? 'Создавайте новые материалы или дорабатывайте возвращенные черновики.'
+            : 'Задачи, назначенные на вашу роль.'
+          }</p>
         </div>
-        <button type="button" className="btn-create" onClick={handleCreateNew}>
-          <span>+</span> Новая статья
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button
+            type="button"
+            className={`btn btn-auto ${activeView === 'articles' ? 'active' : ''}`}
+            onClick={() => setActiveView('articles')}
+          >
+            Статьи
+          </button>
+          <button
+            type="button"
+            className={`btn btn-auto ${activeView === 'tasks' ? 'active' : ''}`}
+            onClick={() => { setActiveView('tasks'); void markAllSeen(); }}
+            style={{ position: 'relative' }}
+          >
+            Задачи
+            {unreadCount > 0 && (
+              <span className="tasks-badge">{unreadCount}</span>
+            )}
+          </button>
+          {activeView === 'articles' && (
+            <button type="button" className="btn-create" onClick={handleCreateNew}>
+              <span>+</span> Новая статья
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="articles-layout">
-        <div className="articles-sidebar">
-          {renderSection('Черновики', drafts, 'Нет черновиков')}
-          {renderSection('На доработке', needsRevision, 'Нет статей на доработке')}
-          {renderSection('На проверке', inReview, 'Нет статей на проверке', false)}
-          {renderSection('Одобрено', approved, 'Нет одобренных', false)}
-        </div>
-        <div className="articles-editor">
-          <AuthorEditor />
-        </div>
-      </div>
+      {activeView === 'tasks' ? (
+        <MyTasksPage onOpenArticle={handleOpenArticleFromTask} />
+      ) : (
+        <>
+          {error && (
+            <div style={{ padding: '12px 16px', background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: 8, marginBottom: 16, color: '#991b1b' }}>
+              Ошибка загрузки статей: {error}
+            </div>
+          )}
+          {loading && articles.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px 20px' }}>
+              <p>Загрузка статей...</p>
+            </div>
+          ) : (
+            <div className="articles-layout">
+              <div className="articles-sidebar">
+                {renderSection('Черновики', drafts, 'Нет черновиков')}
+                {renderSection('На доработке', needsRevision, 'Нет статей на доработке')}
+                {renderSection('На проверке', inReview, 'Нет статей на проверке', false)}
+                {renderSection('Одобрено', approved, 'Нет одобренных', false)}
+              </div>
+              <div className="articles-editor">
+                <AuthorEditor />
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 };

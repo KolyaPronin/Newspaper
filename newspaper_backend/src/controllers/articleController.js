@@ -1,5 +1,6 @@
 const Article = require('../models/Article');
 const Issue = require('../models/Issue');
+const taskService = require('../services/taskService');
 
 const isOwner = (article, userId) => {
   if (!article?.authorId) return false;
@@ -236,6 +237,8 @@ const submitForReview = async (req, res) => {
     article.status = 'under_review';
     await article.save();
 
+    await taskService.onArticleSubmittedForReview(article, req.user.id);
+
     const populatedArticle = await Article.findById(article._id)
       .populate('authorId', 'username email')
       .populate({
@@ -277,6 +280,8 @@ const approveArticle = async (req, res) => {
     article.status = 'approved';
     await article.save();
 
+    await taskService.onArticleApprovedByProofreader(article, req.user.id);
+
     const populatedArticle = await Article.findById(article._id)
       .populate('authorId', 'username email')
       .populate({
@@ -299,6 +304,7 @@ const approveArticle = async (req, res) => {
 
 const requestRevision = async (req, res) => {
   try {
+    const { revisionNote } = req.body;
     const article = await Article.findById(req.params.id);
 
     if (!article) {
@@ -315,8 +321,21 @@ const requestRevision = async (req, res) => {
       });
     }
 
+    if (!revisionNote || !String(revisionNote).trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'revisionNote is required',
+      });
+    }
+
     article.status = 'needs_revision';
     await article.save();
+
+    await taskService.onArticleReturnedForRevision(
+      article,
+      String(revisionNote).trim(),
+      req.user.id,
+    );
 
     const populatedArticle = await Article.findById(article._id)
       .populate('authorId', 'username email')

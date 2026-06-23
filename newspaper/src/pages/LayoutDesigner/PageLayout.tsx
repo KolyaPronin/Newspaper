@@ -1,263 +1,253 @@
-import React from 'react';
-import { PageTemplate, ColumnContainer } from '../../types/PageTemplate';
+import React, { useMemo } from 'react';
+import { PageTemplate, ColumnContainer, LayoutIllustration, LayoutAd } from '../../types/PageTemplate';
+import { Article } from '../../types/Article';
+import { Illustration } from '../../utils/api';
+import ColumnFlowBody from './ColumnFlowBody';
+import { getColumnHtml } from './workspace/columnHtml/columnHtmlModel';
 
 export interface PageLayoutProps {
   template: PageTemplate;
+  pageNumber: number;
   columns: ColumnContainer[][];
-  onDropArticle: (articleId: string, columnIndex: number, containerIndex: number) => void;
-  onDeleteContainer?: (columnIndex: number, containerIndex: number) => void;
+  articles: Article[];
+  illustrations?: Illustration[];
+  onColumnHtmlChange: (columnIndex: number, html: string) => void;
+  interactionDisabled?: boolean;
   headerContent: string;
   onHeaderChange: (content: string) => void;
+  layoutIllustrations?: LayoutIllustration[];
+  onDropIllustration?: (illustrationId: string, columnIndex: number, positionIndex: number) => void;
+  onDeleteIllustration?: (columnIndex: number, positionIndex: number) => void;
+  ads?: Illustration[];
+  layoutAds?: LayoutAd[];
+  onDropAd?: (illustrationId: string, slotIndex: number) => void;
+  onDeleteAd?: (slotIndex: number) => void;
 }
 
-const PageLayout: React.FC<PageLayoutProps> = ({ template, columns, onDropArticle, onDeleteContainer, headerContent, onHeaderChange }) => {
-  const handleDrop = (e: React.DragEvent, columnIndex: number, containerIndex: number) => {
-    e.preventDefault();
-    const articleId = e.dataTransfer.getData('articleId');
-    if (articleId) {
-      onDropArticle(articleId, columnIndex, containerIndex);
+const PageLayout: React.FC<PageLayoutProps> = ({
+  template,
+  pageNumber,
+  columns,
+  articles,
+  illustrations = [],
+  onColumnHtmlChange,
+  interactionDisabled,
+  layoutIllustrations = [],
+  onDropIllustration,
+  onDeleteIllustration,
+  ads = [],
+  layoutAds = [],
+  onDropAd,
+  onDeleteAd,
+}) => {
+  const parseDragPayload = (e: React.DragEvent): Record<string, unknown> | null => {
+    try {
+      const raw = e.dataTransfer.getData('application/x-newspaper-dnd') || e.dataTransfer.getData('text/plain');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
     }
+  };
+
+  const readDraggedIllustrationId = (e: React.DragEvent, pool: Illustration[]): string => {
+    const direct = e.dataTransfer.getData('illustrationId');
+    if (direct) return direct;
+
+    const payload = parseDragPayload(e);
+    if (payload && typeof payload.illustrationId === 'string' && payload.illustrationId) {
+      return payload.illustrationId;
+    }
+
+    const raw = e.dataTransfer.getData('text/plain');
+    if (!raw) return '';
+
+    const byUrl = pool.find(i => i.url === raw || raw.includes(i.url));
+    if (byUrl) return byUrl.id;
+
+    return raw;
   };
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
+    e.dataTransfer.dropEffect = interactionDisabled ? 'none' : 'copy';
+  };
+
+  const getIllustrationForSlot = (columnIndex: number, positionIndex: number): Illustration | null => {
+    const layoutIll = layoutIllustrations.find(
+      li => li.columnIndex === columnIndex && li.positionIndex === positionIndex
+    );
+    if (layoutIll) {
+      return illustrations.find(ill => ill.id === layoutIll.illustrationId) || null;
+    }
+    return null;
+  };
+
+  const getAdForSlot = (slotIndex: number): Illustration | null => {
+    const binding = layoutAds.find(a => a.slotIndex === slotIndex);
+    if (!binding) return null;
+    return ads.find(a => a.id === binding.illustrationId) || null;
   };
 
   const columnWidth = `calc((100% - ${(template.columns - 1) * 16}px) / ${template.columns})`;
 
+  const adSlotsToRender = useMemo(() => {
+    const slots = template.adSlots || [];
+    if (slots.length === 0) return [];
+    if (slots.length >= 2) return slots.slice(0, 2);
+    const only = slots[0];
+    return [only, { ...only, id: `${only.id}_auto_second` }];
+  }, [template.adSlots]);
+
+  const handleIllustrationDrop = (e: React.DragEvent, columnIndex: number, positionIndex: number) => {
+    if (interactionDisabled) return;
+    e.preventDefault();
+    const assetKind = e.dataTransfer.getData('assetKind');
+    if (assetKind && assetKind !== 'illustration') return;
+    const illustrationId = readDraggedIllustrationId(e, illustrations);
+    if (illustrationId && onDropIllustration) {
+      onDropIllustration(illustrationId, columnIndex, positionIndex);
+    }
+  };
+
+  const handleAdDrop = (e: React.DragEvent, slotIndex: number) => {
+    if (interactionDisabled) return;
+    e.preventDefault();
+    const assetKind = e.dataTransfer.getData('assetKind');
+    if (assetKind && assetKind !== 'ad') return;
+    const illustrationId = readDraggedIllustrationId(e, ads);
+    if (illustrationId && onDropAd) {
+      onDropAd(illustrationId, slotIndex);
+    }
+  };
+
   return (
-    <div className="page-layout" style={{ 
-      margin: '20px auto', 
-      width: '210mm', 
-      height: '297mm', 
-      background: '#fff', 
-      boxShadow: '0 0 20px rgba(0,0,0,0.1)',
-      display: 'flex',
-      flexDirection: 'column',
-    }}>
-      <div className="page-header" style={{ 
-        minHeight: '40px',
-        borderBottom: '1px solid #ddd', 
-        padding: '12px', 
-        textAlign: 'center', 
-        background: '#f5f5f5' 
-      }}>
-        <input
-          type="text"
-          value={headerContent}
-          onChange={(e) => onHeaderChange(e.target.value)}
-          style={{
-            width: '100%',
-            border: 'none',
-            background: 'transparent',
-            fontSize: '16px',
-            fontWeight: 600,
-            textAlign: 'center',
-            outline: 'none',
-          }}
-          placeholder="Заголовок газеты"
-        />
+    <div className="page-layout">
+      <div className="page-header">
+        <div className="page-header-fixed-title">XPress</div>
       </div>
 
-      <div className="page-content" style={{ 
-        display: 'flex', 
-        gap: '16px',
-        padding: '16px',
-        flex: 1,
-        overflow: 'hidden',
-        minHeight: 0,
-      }}>
-        {columns.map((columnContainers, colIndex) => {
-          const hasIllustration = template.illustrationPositions.some(
-            pos => pos.allowedColumns.includes(colIndex)
-          );
-          const illustrationHeight = hasIllustration ? 120 : 0;
-          
-          return (
+      <div className="page-content page-content--columns">
+        <div className="page-columns-row">
+          {Array.from({ length: template.columns }).map((_, colIndex) => (
             <div
-              key={colIndex}
-              className="page-column"
-              style={{
-                width: columnWidth,
-                padding: '12px',
-                position: 'relative',
-                background: '#fafafa',
-                borderRadius: '8px',
-                border: '1px solid #e0e0e0',
-                display: 'flex',
-                flexDirection: 'column',
-                height: '100%',
-                overflow: 'hidden',
-              }}
+              key={`col-wrap-${pageNumber}-${colIndex}`}
+              className="page-col-wrapper"
+              style={{ width: columnWidth }}
             >
-              <div
-                style={{
-                  height: hasIllustration ? `calc(100% - ${illustrationHeight}px - 12px)` : '100%',
-                  maxHeight: hasIllustration ? `calc(100% - ${illustrationHeight}px - 12px)` : '100%',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  overflow: 'hidden',
-                  marginBottom: hasIllustration ? '12px' : '0',
-                }}
-              >
-                {columnContainers.length === 0 ? (
-                  <div
-                    className="column-container empty"
-                    onDrop={(e) => handleDrop(e, colIndex, 0)}
-                    onDragOver={handleDragOver}
-                    style={{
-                      border: '2px dashed var(--accent)',
-                      borderRadius: '4px',
-                      padding: '20px',
-                      background: 'rgba(6, 191, 204, 0.05)',
-                      cursor: 'pointer',
-                      flexShrink: 0,
-                      minHeight: '100px',
-                      height: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <div style={{ color: 'var(--subtext)', fontSize: '12px', textAlign: 'center' }}>
-                      Перетащите статью сюда
-                    </div>
-                  </div>
-                ) : (
-                  <div
-                    key={columnContainers[0].id}
-                    className={`column-container ${columnContainers[0].isFilled ? 'filled' : 'empty'}`}
-                    onDrop={(e) => handleDrop(e, colIndex, 0)}
-                    onDragOver={handleDragOver}
-                    style={{
-                      border: columnContainers[0].isFilled ? 'none' : '2px dashed var(--accent)',
-                      borderRadius: hasIllustration ? '4px 4px 0 0' : '4px',
-                      padding: columnContainers[0].isFilled ? '8px' : '20px',
-                      background: columnContainers[0].isFilled ? 'transparent' : 'rgba(6, 191, 204, 0.05)',
-                      cursor: columnContainers[0].isFilled ? 'default' : 'pointer',
-                      flexShrink: 0,
-                      minHeight: '100px',
-                      height: '100%',
-                      maxHeight: '100%',
-                      overflowY: 'hidden',
-                      display: 'flex',
-                      flexDirection: 'column',
-                    }}
-                  >
-                    {columnContainers[0].isFilled ? (
-                      <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column' }}>
-                        <div
-                          className="article-content"
-                          dangerouslySetInnerHTML={{ __html: columnContainers[0].content }}
-                          style={{ fontSize: '12px', lineHeight: '1.5', flex: 1 }}
-                        />
-                        {onDeleteContainer && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDeleteContainer(colIndex, 0);
-                            }}
-                            style={{
-                              position: 'absolute',
-                              top: '4px',
-                              right: '4px',
-                              background: 'rgba(255, 107, 107, 0.9)',
-                              border: 'none',
-                              borderRadius: '4px',
-                              color: 'white',
-                              cursor: 'pointer',
-                              padding: '4px 8px',
-                              fontSize: '10px',
-                              fontWeight: 500,
-                              zIndex: 10,
-                            }}
-                            title="Удалить текст"
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      <div style={{ color: 'var(--subtext)', fontSize: '12px', textAlign: 'center', flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        Перетащите статью сюда
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-              
-              {template.illustrationPositions
-                .filter(pos => pos.allowedColumns.includes(colIndex))
-                .map((pos, idx) => (
-                  <div
-                    key={`illus_${colIndex}_${idx}`}
-                    className="illustration-slot"
-                    style={{
-                      width: '100%',
-                      height: '120px',
-                      border: '2px dashed #4ecdc4',
-                      background: 'rgba(78, 205, 196, 0.1)',
-                      borderRadius: '6px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '11px',
-                      color: '#4ecdc4',
-                      flexShrink: 0,
-                      marginTop: idx > 0 ? '12px' : '0',
-                    }}
-                  >
-                    Иллюстрация
-                  </div>
-                ))}
-            </div>
-          );
-        })}
-      </div>
-
-      {template.adSlots.length > 0 && (
-        <div style={{
-          padding: '12px 16px',
-          borderTop: '1px solid #e0e0e0',
-        }}>
-          {template.adSlots.map(slot => (
-            <div
-              key={slot.id}
-              className="ad-slot"
-              style={{
-                width: '100%',
-                height: '60px',
-                border: '2px dashed #ff6b6b',
-                background: 'rgba(255, 107, 107, 0.15)',
-                borderRadius: '6px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '11px',
-                color: '#ff6b6b',
-                fontWeight: 500,
-              }}
-            >
-              Реклама
+              <ColumnFlowBody
+                key={`col-${pageNumber}-${colIndex}`}
+                columnIndex={colIndex}
+                html={getColumnHtml(columns, colIndex, illustrations)}
+                articles={articles}
+                illustrations={illustrations}
+                disabled={interactionDisabled}
+                onHtmlChange={(html) => onColumnHtmlChange(colIndex, html)}
+              />
             </div>
           ))}
         </div>
-      )}
 
-      <div className="page-footer" style={{ 
-        minHeight: '30px',
-        borderTop: '1px solid #ddd', 
-        padding: '8px', 
-        textAlign: 'center', 
-        background: '#f5f5f5', 
-        fontSize: '12px' 
-      }}>
-        {template.footers.content}
+        <div className="page-illustration-row">
+          {Array.from({ length: template.columns }).map((_, colIndex) => {
+            const illustrationSlotsCount = template.illustrationPositions.filter(pos =>
+              pos.allowedColumns.includes(colIndex)
+            ).length;
+            const hasIllustration = illustrationSlotsCount > 0;
+
+            if (!hasIllustration) {
+              return <div key={colIndex} className="page-illustration-slot-spacer" style={{ width: columnWidth }} />;
+            }
+
+            return (
+              <div key={colIndex} className="page-column-wrapper page-column-wrapper--slots-only" style={{ width: columnWidth }}>
+                <div className="illustrations-container">
+                  {template.illustrationPositions
+                    .filter(pos => pos.allowedColumns.includes(colIndex))
+                    .map((pos, idx) => {
+                      const illustration = getIllustrationForSlot(colIndex, idx);
+                      return (
+                        <div
+                          key={`illus_${colIndex}_${idx}`}
+                          className={`illustration-slot ${illustration ? 'filled' : ''}`}
+                          onDrop={e => handleIllustrationDrop(e, colIndex, idx)}
+                          onDragOver={handleDragOver}
+                          style={{ marginTop: idx > 0 ? '12px' : '0' }}
+                        >
+                          {illustration ? (
+                            <>
+                              <img
+                                src={illustration.url}
+                                alt={illustration.caption || ''}
+                                className="illustration-slot-image"
+                              />
+                              {onDeleteIllustration && (
+                                <button
+                                  type="button"
+                                  className="delete-illustration-btn"
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    onDeleteIllustration(colIndex, idx);
+                                  }}
+                                  title="Удалить иллюстрацию"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </>
+                          ) : (
+                            <span>Иллюстрация</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
+
+      {adSlotsToRender.length > 0 && (
+        <div className="ad-slots-container">
+          {adSlotsToRender.map((slot, idx) => {
+            const ad = getAdForSlot(idx);
+            return (
+              <div
+                key={slot.id}
+                className="ad-slot"
+                onDrop={e => handleAdDrop(e, idx)}
+                onDragOver={handleDragOver}
+                style={{ position: 'relative', overflow: 'hidden' }}
+              >
+                {ad ? (
+                  <>
+                    <img src={ad.url} alt={ad.caption || ''} className="illustration-slot-image" />
+                    {onDeleteAd && (
+                      <button
+                        type="button"
+                        className="delete-illustration-btn"
+                        onClick={e => {
+                          e.stopPropagation();
+                          onDeleteAd(idx);
+                        }}
+                        title="Удалить рекламу"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <span>Реклама</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 };
 
 export default PageLayout;
-

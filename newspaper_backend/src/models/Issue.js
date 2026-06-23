@@ -19,6 +19,26 @@ const issueSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
+  templateId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Template',
+    default: null,
+  },
+  pageCount: {
+    type: Number,
+    min: 1,
+    default: null,
+  },
+  layoutNotes: {
+    type: String,
+    default: '',
+    trim: true,
+  },
+  assignedLayoutDesignerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null,
+  },
 }, {
   timestamps: true,
 });

@@ -1,0 +1,227 @@
+.author-workspace {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.articles-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.articles-sidebar {
+  position: sticky;
+  top: 24px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+}
+
+.articles-editor {
+  min-width: 0;
+}
+
+.article-section-compact {
+  margin-bottom: 20px;
+  background: rgba(21, 24, 33, 0.3);
+  border: 1px solid rgba(38, 42, 54, 0.3);
+  border-radius: 12px;
+  padding: 12px;
+  backdrop-filter: blur(6px);
+}
+
+.article-section {
+  margin-bottom: 32px;
+}
+
+.article-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.article-section-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.article-section-header span {
+  font-size: 12px;
+  color: var(--subtext);
+}
+
+.article-count {
+  background: rgba(6, 191, 204, 0.2);
+  color: var(--accent);
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.article-empty {
+  color: var(--subtext);
+  font-size: 14px;
+  margin: 8px 0;
+}
+
+.article-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.article-card {
+  background: rgba(21, 24, 33, 0.4);
+  border: 1px solid rgba(38, 42, 54, 0.35);
+  border-radius: 12px;
+  padding: 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .2s ease, transform .1s ease, background .2s ease;
+  color: var(--text);
+}
+
+.article-card h4 {
+  margin: 0 0 6px 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.article-status {
+  margin: 0 0 4px 0;
+  font-size: 13px;
+  color: var(--subtext);
+}
+
+.article-date {
+  margin: 0;
+  font-size: 12px;
+  color: var(--subtext);
+}
+
+.article-card:hover:not(.disabled) {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  background: rgba(21, 24, 33, 0.5);
+}
+
+.article-card.selected {
+  border-color: var(--accent);
+  background: rgba(6, 191, 204, 0.1);
+}
+
+.article-card.disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.article-list-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.article-card-compact {
+  background: rgba(14, 16, 22, 0.5);
+  border: 1px solid rgba(38, 42, 54, 0.4);
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .2s ease, background .2s ease;
+  color: var(--text);
+  width: 100%;
+}
+
+.article-card-compact:hover:not(.disabled) {
+  border-color: var(--accent);
+  background: rgba(14, 16, 22, 0.7);
+}
+
+.article-card-compact.selected {
+  border-color: var(--accent);
+  background: rgba(6, 191, 204, 0.15);
+}
+
+.article-card-compact.disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.article-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.article-card-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.article-status-badge {
+  font-size: 11px;
+  color: var(--subtext);
+  padding: 2px 6px;
+  background: rgba(38, 42, 54, 0.4);
+  border-radius: 6px;
+}
+
+.article-date-small {
+  font-size: 11px;
+  color: var(--subtext);
+}
+
+.btn-create {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+  transition: background 0.2s ease, transform 0.02s ease, box-shadow 0.2s ease;
+}
+
+.btn-create span {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.btn-create:hover {
+  background: var(--accent-hover);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.4);
+}
+
+.btn-create:active {
+  transform: translateY(1px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+@media (max-width: 1024px) {
+  .articles-layout {
+    grid-template-columns: 1fr;
+  }
+  
+  .articles-sidebar {
+    position: static;
+    max-height: none;
+  }
+}
+
+

@@ -6,9 +6,24 @@ import { UserRole } from '../../types/User';
 import AuthorWorkspace from '../Author/AuthorWorkspace';
 import ProofreaderWorkspace from '../Proofreader/ProofreaderWorkspace';
 import LayoutDesignerWorkspace from '../LayoutDesigner/LayoutDesignerWorkspace';
+import IllustratorWorkspace from '../Illustrator/IllustratorWorkspace';
+import ChiefEditorWorkspace from '../ChiefEditor/ChiefEditorWorkspace';
 
 const Dashboard: React.FC = () => {
-  const { user, logout } = useAuth();
+  const { user, logout, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="app-background" style={{ backgroundImage: `url('/Mokka-tree.jpg')` }}>
+        <div className="dashboard">
+          <header className="app-header">
+            <h1>NEWSPAPER</h1>
+            <p>Загрузка данных...</p>
+          </header>
+        </div>
+      </div>
+    );
+  }
 
   if (!user) {
     return (
@@ -34,7 +49,7 @@ const Dashboard: React.FC = () => {
         <main>
           <AuthorWorkspace />
           <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
-            <button className="btn" onClick={logout} style={{ maxWidth: 240 }}>
+            <button className="btn" onClick={() => logout()} style={{ maxWidth: 240 }}>
               Выйти
             </button>
           </div>
@@ -53,7 +68,7 @@ const Dashboard: React.FC = () => {
         <main>
           <ProofreaderWorkspace />
           <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
-            <button className="btn" onClick={logout} style={{ maxWidth: 240 }}>
+          <button className="btn" onClick={() => logout()} style={{ maxWidth: 240 }}>
               Выйти
             </button>
           </div>
@@ -72,7 +87,45 @@ const Dashboard: React.FC = () => {
         <main>
           <LayoutDesignerWorkspace />
           <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
-            <button className="btn" onClick={logout} style={{ maxWidth: 240 }}>
+            <button className="btn" onClick={() => logout()} style={{ maxWidth: 240 }}>
+              Выйти
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  if (user.role === UserRole.ILLUSTRATOR || String(user.role).toLowerCase() === 'illustrator') {
+    return (
+      <div className="dashboard">
+        <header className="app-header">
+          <h1>NEWSPAPER</h1>
+          <p>Здравствуйте, {user.username}. Роль: Иллюстратор</p>
+        </header>
+        <main>
+          <IllustratorWorkspace />
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
+            <button className="btn" onClick={() => logout()} style={{ maxWidth: 240 }}>
+              Выйти
+            </button>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  if (user.role === UserRole.CHIEF_EDITOR || String(user.role).toLowerCase() === 'chief_editor') {
+    return (
+      <div className="dashboard">
+        <header className="app-header">
+          <h1>NEWSPAPER</h1>
+          <p>Здравствуйте, {user.username}. Роль: Главный редактор</p>
+        </header>
+        <main>
+          <ChiefEditorWorkspace />
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
+            <button className="btn" onClick={() => logout()} style={{ maxWidth: 240 }}>
               Выйти
             </button>
           </div>
@@ -98,7 +151,7 @@ const Dashboard: React.FC = () => {
               <li key={route}>{route}</li>
             ))}
           </ul>
-          <button className="btn" onClick={logout}>Выйти</button>
+          <button className="btn" onClick={() => logout()}>Выйти</button>
         </div>
       </main>
     </div>

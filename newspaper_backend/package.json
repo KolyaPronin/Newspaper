@@ -10,7 +10,11 @@
     "init-templates": "node src/scripts/initTemplates.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["newspaper", "api", "editorial"],
+  "keywords": [
+    "newspaper",
+    "api",
+    "editorial"
+  ],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
@@ -18,7 +22,7 @@
     "bcryptjs": "^2.4.3",
     "chalk": "^4.1.2",
     "cors": "^2.8.5",
-    "dotenv": "^17.2.3",
+    "dotenv": "^17.4.2",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.19.4",

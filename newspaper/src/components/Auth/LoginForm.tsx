@@ -1,64 +1,77 @@
 import React, { useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContexts';
-import { mockUsers } from '../../data/users';
-import { User, UserRole } from '../../types/User';
+import { UserRole } from '../../types/User';
+
+type AuthMode = 'login' | 'register';
 
 const LoginForm: React.FC = () => {
-  const { login } = useAuth();
+  const { login, register, loading, error: authError } = useAuth();
+  const [mode, setMode] = useState<AuthMode>('login');
   const [username, setUsername] = useState<string>('');
+  const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [role, setRole] = useState<UserRole | ''>('');
+  const [localError, setLocalError] = useState<string | null>(null);
 
-  const roleOptions = useMemo<UserRole[]>(() => {
-    // берем роли из enum, чтобы были все доступные, а не только из моков
-    return [
+  const roleOptions = useMemo<UserRole[]>(() => [
       UserRole.AUTHOR,
       UserRole.PROOFREADER,
       UserRole.ILLUSTRATOR,
       UserRole.LAYOUT_DESIGNER,
-      UserRole.CHIEF_EDITOR
-    ];
-  }, []);
+    UserRole.CHIEF_EDITOR,
+  ], []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const resetForm = () => {
+    setUsername('');
+    setEmail('');
+    setPassword('');
+    setRole('');
+    setLocalError(null);
+  };
+
+  const switchMode = () => {
+    setMode(prev => (prev === 'login' ? 'register' : 'login'));
+    resetForm();
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Временно: эмулируем вход без сервера.
-    // Если поля пусты, можно подставить из моков для удобства.
-    let selectedRole = role || mockUsers[0].role;
-    let finalUsername = username.trim() || `user_${selectedRole}`;
-    
-    // Ищем пользователя в моках по роли, или создаем стабильный ID на основе username + role
-    const mockUser = mockUsers.find(u => u.role === selectedRole);
-    let userId: string;
-    
-    if (mockUser) {
-      // Используем ID из моков для стабильности
-      userId = mockUser.id;
-      finalUsername = mockUser.username;
-    } else {
-      // Создаем стабильный ID на основе username + role (hash)
-      const hash = `${finalUsername}_${selectedRole}`.split('').reduce((acc, char) => {
-        acc = ((acc << 5) - acc) + char.charCodeAt(0);
-        return acc & acc;
-      }, 0);
-      userId = `user_${Math.abs(hash)}`;
+    setLocalError(null);
+
+    try {
+      if (mode === 'login') {
+        if (!email.trim() || !password) {
+          setLocalError('Введите email и пароль');
+          return;
+        }
+        await login({ email: email.trim().toLowerCase(), password });
+      } else {
+        if (!username.trim() || !email.trim() || !password || !role) {
+          setLocalError('Заполните все поля и выберите роль');
+          return;
+        }
+        await register({
+          username: username.trim(),
+          email: email.trim().toLowerCase(),
+          password,
+          role,
+        });
+      }
+    } catch {
     }
-    
-    const user: User = {
-      id: userId,
-      username: finalUsername,
-      email: `${finalUsername}@local`,
-      role: selectedRole
-    };
-    login(user);
   };
 
   return (
     <div className="auth-container">
       <div className="auth-card">
-        <h1 className="auth-title">Вход</h1>
-        <p className="auth-subtitle">Введите данные и выберите роль</p>
+        <h1 className="auth-title">{mode === 'login' ? 'Вход' : 'Регистрация'}</h1>
+        <p className="auth-subtitle">
+          {mode === 'login'
+            ? 'Введите email и пароль, чтобы войти'
+            : 'Создайте новый аккаунт, выбрав роль'}
+        </p>
         <form className="auth-form" onSubmit={handleSubmit}>
+          {mode === 'register' && (
           <div className="field">
             <label className="label" htmlFor="username">Логин</label>
             <input
@@ -69,6 +82,19 @@ const LoginForm: React.FC = () => {
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="username"
+              />
+            </div>
+          )}
+          <div className="field">
+            <label className="label" htmlFor="email">Email</label>
+            <input
+              id="email"
+              className="input"
+              type="email"
+              placeholder="ivan@newspaper.local"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete={mode === 'login' ? 'email' : 'new-email'}
             />
           </div>
           <div className="field">
@@ -80,9 +106,10 @@ const LoginForm: React.FC = () => {
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
             />
           </div>
+          {mode === 'register' && (
           <div className="field">
             <label className="label" htmlFor="role">Роль</label>
             <select
@@ -97,7 +124,35 @@ const LoginForm: React.FC = () => {
               ))}
             </select>
           </div>
-          <button type="submit" className="btn">Войти</button>
+          )}
+          {(localError || authError) && (
+            <div style={{ 
+              padding: '8px 12px', 
+              background: '#fee2e2', 
+              border: '1px solid #fca5a5', 
+              borderRadius: 6, 
+              marginBottom: 12,
+              color: '#991b1b',
+              fontSize: 14
+            }}>
+              {localError || authError}
+            </div>
+          )}
+          <button 
+            type="submit" 
+            className="btn" 
+            disabled={loading}
+          >
+            {loading ? 'Подождите...' : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            style={{ marginTop: 12, backgroundColor: '#111827' }}
+            onClick={switchMode}
+          >
+            {mode === 'login' ? 'Создать аккаунт' : 'У меня уже есть аккаунт'}
+          </button>
         </form>
       </div>
     </div>

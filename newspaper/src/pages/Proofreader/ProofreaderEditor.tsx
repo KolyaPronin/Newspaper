@@ -1,56 +1,21 @@
 import React, { useEffect, useState } from 'react';
-import { useEditor, EditorContent } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import TextAlign from '@tiptap/extension-text-align';
-import Highlight from '@tiptap/extension-highlight';
-import Underline from '@tiptap/extension-underline';
-import Link from '@tiptap/extension-link';
-import Image from '@tiptap/extension-image';
-import { Table } from '@tiptap/extension-table';
-import { TableRow } from '@tiptap/extension-table-row';
-import { TableCell } from '@tiptap/extension-table-cell';
-import { TableHeader } from '@tiptap/extension-table-header';
+import { createPortal } from 'react-dom';
+import { EditorContent } from '@tiptap/react';
 import { useArticles } from '../../contexts/ArticleContext';
+import { useTipTapEditor } from '../../hooks/useTipTapEditor';
+import { useEditorToolbar } from '../../hooks/useEditorToolbar';
+import EditorToolbar from '../../components/Editor/EditorToolbar';
 
 const ProofreaderEditor: React.FC = () => {
   const { currentArticle, updateArticleContent, approveArticle, requestRevision, setCurrentArticle } = useArticles();
-  const [headingValue, setHeadingValue] = useState<string>('paragraph');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [approveStatus, setApproveStatus] = useState<'idle' | 'processing' | 'done' | 'error'>('idle');
   const [returnStatus, setReturnStatus] = useState<'idle' | 'processing' | 'done' | 'error'>('idle');
+  const [returnModalOpen, setReturnModalOpen] = useState(false);
+  const [revisionNote, setRevisionNote] = useState('');
+  const [returnError, setReturnError] = useState<string | null>(null);
 
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        heading: {
-          levels: [1, 2, 3, 4, 5, 6],
-        },
-        // Отключаем встроенный Link из StarterKit, используем свой с автолинками
-        link: false,
-      }),
-      TextAlign.configure({
-        types: ['heading', 'paragraph'],
-      }),
-      Highlight,
-      Underline,
-      Link.configure({
-        openOnClick: false,
-        autolink: true,
-        linkOnPaste: true,
-      }),
-      Image.configure({
-        HTMLAttributes: { class: 'editor-image' },
-      }),
-      Table.configure({
-        resizable: false,
-        HTMLAttributes: { class: 'editor-table' },
-      }),
-      TableRow,
-      TableHeader,
-      TableCell,
-    ],
-    editable: Boolean(currentArticle),
-  });
+  const editor = useTipTapEditor(currentArticle?.content || '', true);
 
   useEffect(() => {
     if (!editor) return;
@@ -63,70 +28,17 @@ const ProofreaderEditor: React.FC = () => {
   }, [currentArticle, editor]);
 
   useEffect(() => {
-    if (!editor) return undefined;
-
-    const updateHeading = () => {
-      let value = 'paragraph';
-      for (let level = 1; level <= 6; level++) {
-        if (editor.isActive('heading', { level })) {
-          value = `h${level}`;
-          break;
-        }
-      }
-      setHeadingValue(value);
-    };
-
-    updateHeading();
-    editor.on('selectionUpdate', updateHeading);
-    editor.on('transaction', updateHeading);
-
+    if (!returnModalOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     return () => {
-      editor.off('selectionUpdate', updateHeading);
-      editor.off('transaction', updateHeading);
+      document.body.style.overflow = prev;
     };
-  }, [editor]);
+  }, [returnModalOpen]);
 
-  const applyHeading = (value: string) => {
-    if (!editor) return;
-    editor.chain().focus();
-    if (value === 'paragraph') {
-      editor.chain().focus().setParagraph().run();
-      setHeadingValue('paragraph');
-      return;
-    }
-    const level = Number(value.replace('h', '')) as 1 | 2 | 3 | 4 | 5 | 6;
-    editor.chain().focus().setHeading({ level }).run();
-    setHeadingValue(value);
-  };
+  const { headingValue, applyHeading } = useEditorToolbar(editor);
 
-  const promptForLink = () => {
-    if (!editor) return;
-    const previousUrl = editor.getAttributes('link').href as string | undefined;
-    // eslint-disable-next-line no-alert
-    const url = window.prompt('Введите ссылку', previousUrl ?? '');
-    if (url === null) {
-      return;
-    }
-    if (url === '') {
-      editor.chain().focus().extendMarkRange('link').unsetLink().run();
-      return;
-    }
-    editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
-  };
-
-  const promptForImage = () => {
-    if (!editor) return;
-    // eslint-disable-next-line no-alert
-    const url = window.prompt('URL изображения');
-    if (!url) return;
-    editor.chain().focus().setImage({ src: url }).run();
-  };
-
-  const insertTable = () => {
-    editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
-  };
-
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!editor || !currentArticle) {
       setSaveStatus('error');
       setTimeout(() => setSaveStatus('idle'), 2000);
@@ -136,7 +48,7 @@ const ProofreaderEditor: React.FC = () => {
     setSaveStatus('saving');
     try {
       const content = editor.getHTML();
-      updateArticleContent(currentArticle.id, content);
+      await updateArticleContent(currentArticle.id, content);
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
     } catch (error) {
@@ -146,11 +58,11 @@ const ProofreaderEditor: React.FC = () => {
     }
   };
 
-  const handleApprove = () => {
+  const handleApprove = async () => {
     if (!currentArticle) return;
     setApproveStatus('processing');
     try {
-      approveArticle(currentArticle.id);
+      await approveArticle(currentArticle.id);
       setApproveStatus('done');
       setTimeout(() => setApproveStatus('idle'), 3000);
     } catch (error) {
@@ -160,20 +72,105 @@ const ProofreaderEditor: React.FC = () => {
     }
   };
 
-  const handleReturn = () => {
+  const openReturnModal = () => {
+    setRevisionNote('');
+    setReturnError(null);
+    setReturnModalOpen(true);
+  };
+
+  const closeReturnModal = () => {
+    if (returnStatus === 'processing') return;
+    setReturnModalOpen(false);
+    setReturnError(null);
+  };
+
+  const handleReturn = async () => {
     if (!currentArticle) return;
+    if (!revisionNote.trim()) {
+      setReturnError('Опишите, что нужно исправить');
+      return;
+    }
+
     setReturnStatus('processing');
+    setReturnError(null);
     try {
-      requestRevision(currentArticle.id);
+      await requestRevision(currentArticle.id, revisionNote.trim());
+      setReturnModalOpen(false);
+      setRevisionNote('');
       setCurrentArticle(null);
       setReturnStatus('done');
       setTimeout(() => setReturnStatus('idle'), 3000);
     } catch (error) {
       console.error('Failed to return article to author:', error);
+      setReturnError(error instanceof Error ? error.message : 'Не удалось вернуть статью');
       setReturnStatus('error');
       setTimeout(() => setReturnStatus('idle'), 2000);
     }
   };
+
+  const returnModal = returnModalOpen ? createPortal(
+    <div className="task-modal-backdrop" onClick={closeReturnModal}>
+      <div
+        className="task-modal task-modal-detail"
+        role="dialog"
+        aria-modal
+        aria-labelledby="revision-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="task-modal-header">
+          <h3 id="revision-modal-title">Вернуть автору</h3>
+          <button
+            type="button"
+            className="task-modal-close"
+            onClick={closeReturnModal}
+            disabled={returnStatus === 'processing'}
+            aria-label="Закрыть"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="task-detail-body">
+          <p className="task-detail-article">
+            Статья: <strong>{currentArticle?.title || 'Без названия'}</strong>
+          </p>
+          <label className="template-select-label">
+            Заметка для автора *
+            <textarea
+              className="template-select task-textarea task-textarea-desc"
+              value={revisionNote}
+              onChange={(e) => setRevisionNote(e.target.value)}
+              disabled={returnStatus === 'processing'}
+              rows={5}
+              placeholder="Что не так и что нужно поправить..."
+              autoFocus
+            />
+          </label>
+          {returnError && <div className="error-message">{returnError}</div>}
+        </div>
+
+        <div className="task-modal-footer">
+          <button
+            type="button"
+            className="btn btn-auto"
+            onClick={closeReturnModal}
+            disabled={returnStatus === 'processing'}
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            className="btn btn-auto task-danger"
+            onClick={() => void handleReturn()}
+            disabled={returnStatus === 'processing'}
+          >
+            {returnStatus === 'processing' ? 'Отправка...' : 'Вернуть автору'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  ) : null;
 
   return (
     <div className="proofreader-editor">
@@ -194,7 +191,7 @@ const ProofreaderEditor: React.FC = () => {
           <button
             type="button"
             className="btn"
-            onClick={handleReturn}
+            onClick={openReturnModal}
             disabled={!currentArticle || returnStatus === 'processing'}
             style={{ background: returnStatus === 'done' ? '#f97316' : undefined }}
           >
@@ -213,175 +210,18 @@ const ProofreaderEditor: React.FC = () => {
       </div>
 
       {editor && (
-        <div className="editor-toolbar" role="toolbar" aria-label="Форматирование">
-          <div className="tool-group">
-            <button
-              type="button"
-              className={`tool-btn ${editor.isActive('bold') ? 'active' : ''}`}
-              onClick={() => editor.chain().focus().toggleBold().run()}
-              aria-label="Жирный"
-              title="Жирный"
-              disabled={!editor.can().chain().focus().toggleBold().run()}
-            >
-              B
-            </button>
-            <button
-              type="button"
-              className={`tool-btn ${editor.isActive('italic') ? 'active' : ''}`}
-              onClick={() => editor.chain().focus().toggleItalic().run()}
-              aria-label="Курсив"
-              title="Курсив"
-              disabled={!editor.can().chain().focus().toggleItalic().run()}
-            >
-              <i>I</i>
-            </button>
-            <button
-              type="button"
-              className={`tool-btn ${editor.isActive('underline') ? 'active' : ''}`}
-              onClick={() => editor.chain().focus().toggleUnderline().run()}
-              aria-label="Подчёркнутый"
-              title="Подчёркнутый"
-            >
-              U
-            </button>
-            <button
-              type="button"
-              className={`tool-btn ${editor.isActive('strike') ? 'active' : ''}`}
-              onClick={() => editor.chain().focus().toggleStrike().run()}
-              aria-label="Зачёркнутый"
-              title="Зачёркнутый"
-            >
-              S
-            </button>
-            <button
-              type="button"
-              className={`tool-btn ${editor.isActive('highlight') ? 'active' : ''}`}
-              onClick={() => editor.chain().focus().toggleHighlight().run()}
-              aria-label="Выделение"
-              title="Выделение"
-            >
-              ✺
-            </button>
-          </div>
-          <div className="tool-sep" />
-          <div className="tool-group">
-            <select
-              className="tool-select"
-              value={headingValue}
-              onChange={(e) => applyHeading(e.target.value)}
-              aria-label="Выбор стиля заголовка"
-            >
-              <option value="paragraph">Параграф</option>
-              <option value="h1">Заголовок 1</option>
-              <option value="h2">Заголовок 2</option>
-              <option value="h3">Заголовок 3</option>
-              <option value="h4">Заголовок 4</option>
-              <option value="h5">Заголовок 5</option>
-              <option value="h6">Заголовок 6</option>
-            </select>
-            <button
-              type="button"
-              className={`tool-btn ${editor.isActive('blockquote') ? 'active' : ''}`}
-              onClick={() => editor.chain().focus().toggleBlockquote().run()}
-              title="Цитата"
-            >
-              ❝ ❞
-            </button>
-          </div>
-          <div className="tool-sep" />
-          <div className="tool-group">
-            <button
-              type="button"
-              className={`tool-btn ${editor.isActive({ textAlign: 'left' }) ? 'active' : ''}`}
-              onClick={() => editor.chain().focus().setTextAlign('left').run()}
-              title="Выровнять влево"
-            >
-              ⇤
-            </button>
-            <button
-              type="button"
-              className={`tool-btn ${editor.isActive({ textAlign: 'center' }) ? 'active' : ''}`}
-              onClick={() => editor.chain().focus().setTextAlign('center').run()}
-              title="По центру"
-            >
-              ⇆
-            </button>
-            <button
-              type="button"
-              className={`tool-btn ${editor.isActive({ textAlign: 'right' }) ? 'active' : ''}`}
-              onClick={() => editor.chain().focus().setTextAlign('right').run()}
-              title="Выровнять вправо"
-            >
-              ⇥
-            </button>
-            <button
-              type="button"
-              className={`tool-btn ${editor.isActive({ textAlign: 'justify' }) ? 'active' : ''}`}
-              onClick={() => editor.chain().focus().setTextAlign('justify').run()}
-              title="По ширине"
-            >
-              ☰
-            </button>
-          </div>
-          <div className="tool-sep" />
-          <div className="tool-group">
-            <button
-              type="button"
-              className={`tool-btn ${editor.isActive('bulletList') ? 'active' : ''}`}
-              onClick={() => editor.chain().focus().toggleBulletList().run()}
-              title="Маркированный список"
-            >
-              • • •
-            </button>
-            <button
-              type="button"
-              className={`tool-btn ${editor.isActive('orderedList') ? 'active' : ''}`}
-              onClick={() => editor.chain().focus().toggleOrderedList().run()}
-              title="Нумерованный список"
-            >
-              1 2 3
-            </button>
-          </div>
-          <div className="tool-sep" />
-          <div className="tool-group">
-            <button type="button" className="tool-btn" onClick={promptForLink} title="Вставить ссылку">
-              🔗
-            </button>
-            <button type="button" className="tool-btn" onClick={() => editor.chain().focus().unsetLink().run()} title="Удалить ссылку">
-              ⛓✕
-            </button>
-            <button type="button" className="tool-btn" onClick={promptForImage} title="Вставить изображение">
-              🖼
-            </button>
-            <button type="button" className="tool-btn" onClick={insertTable} title="Вставить таблицу">
-              ⌗
-            </button>
-          </div>
-          <div className="tool-sep" />
-          <div className="tool-group">
-            <button
-              type="button"
-              className="tool-btn"
-              onClick={() => editor.chain().focus().undo().run()}
-              title="Отменить"
-            >
-              ↶
-            </button>
-            <button
-              type="button"
-              className="tool-btn"
-              onClick={() => editor.chain().focus().redo().run()}
-              title="Повторить"
-            >
-              ↷
-            </button>
-          </div>
-        </div>
+        <EditorToolbar
+          editor={editor}
+          headingValue={headingValue}
+          onHeadingChange={applyHeading}
+        />
       )}
 
-      <div style={{ background: 'rgba(21,24,33,0.25)', border: '1px solid rgba(38,42,54,0.3)', borderRadius: 12, padding: 12 }}>
+      <div className="proofreader-editor-panel">
         {editor ? <EditorContent editor={editor} /> : <p className="article-empty">Выберите статью для редактирования.</p>}
       </div>
+
+      {returnModal}
     </div>
   );
 };
